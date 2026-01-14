@@ -442,10 +442,15 @@ const SelectDateTimeScreen: React.FC<{
   const [availableTimes, setAvailableTimes] = useState<string[]>([]);
   const [blockedSlots, setBlockedSlots] = useState<any[]>([]);
   const [existingAppointments, setExistingAppointments] = useState<any[]>([]);
-  const [settings, setSettings] = useState<{ start: string, end: string, interval: number, lunchStart?: string, lunchEnd?: string }>({ start: '09:00', end: '19:00', interval: 30 });
+  const [workHours, setWorkHours] = useState<any[]>([]);
+  const [settings, setSettings] = useState<{ interval: number }>({ interval: 30 });
 
   useEffect(() => {
     const initData = async () => {
+      // Fetch Work Hours
+      const { data: wh } = await supabase.from('work_hours').select('*');
+      if (wh) setWorkHours(wh);
+
       // Fetch Blocks
       const { data: blocks } = await supabase.from('blocked_slots').select('*');
       if (blocks) {
@@ -465,73 +470,73 @@ const SelectDateTimeScreen: React.FC<{
         })));
       }
 
-      // Fetch Settings
-      const { data: settingsData } = await supabase.from('settings').select('*');
+      // Fetch Config Interval only
+      const { data: settingsData } = await supabase.from('settings').select('*').eq('key', 'interval_minutes').single();
       if (settingsData) {
-        const s: any = {};
-        settingsData.forEach((r: any) => s[r.key] = r.value);
-        setSettings({
-          start: s.start_time || '09:00',
-          end: s.end_time || '19:00',
-          interval: parseInt(s.interval_minutes) || 30,
-          lunchStart: s.lunch_start,
-          lunchEnd: s.lunch_end
-        });
+        setSettings({ interval: parseInt(settingsData.value) || 30 });
       }
     };
     initData();
   }, []);
 
   useEffect(() => {
-    if (!settings.start || !settings.end) return;
-
     const selectedDateStr = nextDays[selectedDateIndex].dateStr;
+    const dateObj = new Date(selectedDateStr + 'T00:00:00');
+    const dayOfWeek = dateObj.getDay(); // 0 = Sun
 
-    // Generate times dynamically based on settings
-    const times = [];
-    let [h, m] = settings.start.split(':').map(Number);
-    const [endH, endM] = settings.end.split(':').map(Number);
-    const endTotal = endH * 60 + endM;
+    const dayConfig = workHours.find(w => w.day_of_week === dayOfWeek);
 
-    while (true) {
-      const totalMins = h * 60 + m;
-      if (totalMins >= endTotal) break;
-
-      const timeStr = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-
-      let isLunch = false;
-      if (settings.lunchStart && settings.lunchEnd) {
-        const [lsH, lsM] = settings.lunchStart.split(':').map(Number);
-        const [leH, leM] = settings.lunchEnd.split(':').map(Number);
-        const lunchStartMins = lsH * 60 + lsM;
-        const lunchEndMins = leH * 60 + leM;
-        if (totalMins >= lunchStartMins && totalMins < lunchEndMins) {
-          isLunch = true;
-        }
-      }
-
-      // Check for past time if today
-      const now = new Date();
-      const isToday = selectedDateStr === `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-      let isPast = false;
-
-      if (isToday) {
-        const currentMins = now.getHours() * 60 + now.getMinutes();
-        if (totalMins <= currentMins) {
-          isPast = true;
-        }
-      }
-
-      if (!isLunch && !isPast) {
-        times.push(timeStr);
-      }
-
-      m += settings.interval;
-      if (m >= 60) {
-        h += Math.floor(m / 60);
-        m = m % 60;
-      }
+    // If no config or closed, no times
+    if (!dayConfig || !dayConfig.is_open) {
+      setAvailableTimes([]);
+      return;
     }
+
+    const times: string[] = [];
+    const interval = settings.interval;
+
+    // Helper to generate slots
+    const generateSlots = (start: string, end: string) => {
+      if (!start || !end) return;
+      let [h, m] = start.slice(0, 5).split(':').map(Number);
+      const [endH, endM] = end.slice(0, 5).split(':').map(Number);
+      const endTotal = endH * 60 + endM;
+
+      while (true) {
+        const totalMins = h * 60 + m;
+        if (totalMins >= endTotal) break;
+
+        const timeStr = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+
+        // Check for past time if today
+        const now = new Date();
+        const isToday = selectedDateStr === `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+        let isPast = false;
+
+        if (isToday) {
+          const currentMins = now.getHours() * 60 + now.getMinutes();
+          if (totalMins <= currentMins) {
+            isPast = true;
+          }
+        }
+
+        if (!isPast) {
+          times.push(timeStr);
+        }
+
+        m += interval;
+        if (m >= 60) {
+          h += Math.floor(m / 60);
+          m = m % 60;
+        }
+      }
+    };
+
+    generateSlots(dayConfig.start_time_1, dayConfig.end_time_1);
+    if (dayConfig.start_time_2 && dayConfig.end_time_2) {
+      generateSlots(dayConfig.start_time_2, dayConfig.end_time_2);
+    }
+
 
     // Filter out blocked slots
     const dayBlocks = blockedSlots.filter(b => b.date === selectedDateStr).map(b => b.time);
@@ -1326,6 +1331,136 @@ const ChatScreen: React.FC<{
 
 
 
+const AdminWeeklyScheduleScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
+  const [schedule, setSchedule] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [editingDay, setEditingDay] = useState<any | null>(null);
+
+  const fetchSchedule = async () => {
+    const { data, error } = await supabase
+      .from('work_hours')
+      .select('*')
+      .order('day_of_week');
+
+    if (data) {
+      setSchedule(data);
+    }
+    setLoading(false);
+  };
+
+  useEffect(() => { fetchSchedule(); }, []);
+
+  const handleToggleDay = async (day: any) => {
+    const newVal = !day.is_open;
+    // Optimistic
+    setSchedule(prev => prev.map(d => d.id === day.id ? { ...d, is_open: newVal } : d));
+
+    await supabase.from('work_hours').update({ is_open: newVal }).eq('id', day.id);
+  };
+
+  const handleSaveDay = async () => {
+    if (!editingDay) return;
+    const { error } = await supabase.from('work_hours').update({
+      start_time_1: editingDay.start_time_1,
+      end_time_1: editingDay.end_time_1,
+      start_time_2: editingDay.start_time_2,
+      end_time_2: editingDay.end_time_2
+    }).eq('id', editingDay.id);
+
+    if (error) alert('Erro ao salvar: ' + error.message);
+    else {
+      setEditingDay(null);
+      fetchSchedule();
+    }
+  };
+
+  const dayNames = ['Domingo', 'Segunda-Feira', 'Terça-Feira', 'Quarta-Feira', 'Quinta-Feira', 'Sexta-Feira', 'Sábado'];
+
+  return (
+    <div className="bg-gradient-to-b from-primary/20 to-white dark:bg-background-dark min-h-screen flex flex-col transition-colors">
+      <header className="sticky top-0 z-50 p-4 border-b border-gray-200 dark:border-white/5 bg-primary text-white flex items-center justify-between shadow-md">
+        <button onClick={onBack} className="size-10 rounded-full flex items-center justify-center hover:bg-white/20 text-white"><span className="material-symbols-outlined">arrow_back</span></button>
+        <h2 className="font-bold text-lg">Horários de Atendimento</h2>
+        <div className="size-10"></div>
+      </header>
+
+      <main className="p-4 space-y-4 max-w-md mx-auto w-full pb-24">
+        {loading ? <div className="text-center p-10">Carregando...</div> : schedule.map(day => (
+          <div key={day.id} className={`bg-gray-100 dark:bg-surface-dark rounded-3xl p-5 border ${day.is_open ? 'border-transparent' : 'border-gray-300 opacity-75'} transition-all`}>
+            <div className="flex justify-between items-center mb-4">
+              <span className="font-bold text-slate-800 dark:text-white capitalize">{dayNames[day.day_of_week]}</span>
+              <div className="flex items-center gap-3">
+                <span className="text-[10px] font-bold uppercase text-gray-400">{day.is_open ? '' : 'Não Atendendo'}</span>
+                <button
+                  onClick={() => handleToggleDay(day)}
+                  className={`w-12 h-6 rounded-full p-0.5 transition-colors ${day.is_open ? 'bg-green-500' : 'bg-gray-400'}`}
+                >
+                  <div className={`h-5 w-5 bg-white rounded-full shadow-sm transition-transform ${day.is_open ? 'translate-x-6' : 'translate-x-0'}`}></div>
+                </button>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between bg-white dark:bg-black/20 p-4 rounded-2xl">
+              {day.is_open ? (
+                <div className="grid grid-cols-2 gap-x-8 gap-y-1 text-sm font-bold text-slate-700 dark:text-gray-300">
+                  <span>{day.start_time_1?.slice(0, 5)}</span>
+                  <span>{day.end_time_1?.slice(0, 5)}</span>
+                  {day.start_time_2 && day.end_time_2 && (
+                    <>
+                      <span>{day.start_time_2?.slice(0, 5)}</span>
+                      <span>{day.end_time_2?.slice(0, 5)}</span>
+                    </>
+                  )}
+                </div>
+              ) : (
+                <span className="text-sm font-bold text-gray-400">Fechado</span>
+              )}
+
+              <button onClick={() => setEditingDay(day)} className="size-8 flex items-center justify-center text-gray-400 hover:text-primary">
+                <span className="material-symbols-outlined">edit</span>
+              </button>
+            </div>
+          </div>
+        ))}
+      </main>
+
+      {/* Edit Modal */}
+      {editingDay && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm px-6">
+          <div className="bg-white dark:bg-surface-dark w-full max-w-sm rounded-3xl p-6 shadow-2xl animate-scale-up">
+            <h3 className="font-bold text-xl mb-6 text-slate-900 dark:text-white text-center">Editar {dayNames[editingDay.day_of_week]}</h3>
+
+            <div className="space-y-4">
+              <div>
+                <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Manhã</label>
+                <div className="flex gap-2">
+                  <input type="time" className="flex-1 bg-gray-100 dark:bg-background-dark p-3 rounded-xl font-bold text-center" value={editingDay.start_time_1} onChange={e => setEditingDay({ ...editingDay, start_time_1: e.target.value })} />
+                  <span className="self-center text-gray-400">-</span>
+                  <input type="time" className="flex-1 bg-gray-100 dark:bg-background-dark p-3 rounded-xl font-bold text-center" value={editingDay.end_time_1} onChange={e => setEditingDay({ ...editingDay, end_time_1: e.target.value })} />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Tarde (Opcional)</label>
+                <div className="flex gap-2">
+                  <input type="time" className="flex-1 bg-gray-100 dark:bg-background-dark p-3 rounded-xl font-bold text-center" value={editingDay.start_time_2 || ''} onChange={e => setEditingDay({ ...editingDay, start_time_2: e.target.value })} />
+                  <span className="self-center text-gray-400">-</span>
+                  <input type="time" className="flex-1 bg-gray-100 dark:bg-background-dark p-3 rounded-xl font-bold text-center" value={editingDay.end_time_2 || ''} onChange={e => setEditingDay({ ...editingDay, end_time_2: e.target.value })} />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-3 pt-6">
+              <button onClick={() => setEditingDay(null)} className="flex-1 py-3.5 text-gray-500 font-bold hover:bg-gray-50 rounded-xl transition-colors">Cancelar</button>
+              <button onClick={handleSaveDay} className="flex-1 py-3.5 bg-primary text-white rounded-xl font-bold shadow-lg shadow-primary/20">Salvar</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const AdminSettingsScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
   const [startTime, setStartTime] = useState('09:00');
   const [endTime, setEndTime] = useState('19:00');
@@ -1512,11 +1647,12 @@ const AdminDashboard: React.FC<{
   onManageServices: () => void;
   onBlockSchedule: () => void;
   onSettings: () => void;
+  onWeeklySchedule: () => void;
   onFinance: () => void;
   onRefresh: () => void;
   onClients: () => void;
   setAppointments: React.Dispatch<React.SetStateAction<Appointment[]>>;
-}> = ({ appointments, onLogout, onOpenChat, onManageServices, onBlockSchedule, onSettings, onFinance, onRefresh, onClients, setAppointments }) => {
+}> = ({ appointments, onLogout, onOpenChat, onManageServices, onBlockSchedule, onSettings, onWeeklySchedule, onFinance, onRefresh, onClients, setAppointments }) => {
   const availableDays = useMemo(() => getNextDays(7), []);
   const [selectedDateStr, setSelectedDateStr] = useState(availableDays[0].dateStr);
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
@@ -1645,15 +1781,15 @@ const AdminDashboard: React.FC<{
           </button>
 
           <button
-            onClick={onSettings}
+            onClick={onWeeklySchedule}
             className="relative group flex flex-col p-4 rounded-3xl bg-white dark:bg-surface-dark border border-gray-100 dark:border-white/5 hover:border-primary/30 active:scale-[0.98] transition-all overflow-hidden shadow-lg h-32 justify-between"
           >
-            <div className="size-10 rounded-xl bg-cyan-500 flex items-center justify-center text-white shadow-lg shadow-cyan-500/20">
-              <span className="material-symbols-outlined filled">settings</span>
+            <div className="size-10 rounded-xl bg-orange-500 flex items-center justify-center text-white shadow-lg shadow-orange-500/20">
+              <span className="material-symbols-outlined filled">calendar_clock</span>
             </div>
             <div className="text-left">
-              <h3 className="font-bold text-slate-900 dark:text-white">Configurar</h3>
-              <p className="text-gray-500 dark:text-white/70 text-[10px] font-bold uppercase tracking-widest">Agenda Details</p>
+              <h3 className="font-bold text-slate-900 dark:text-white">Horários</h3>
+              <p className="text-gray-500 dark:text-white/70 text-[10px] font-bold uppercase tracking-widest">Configurar Semana</p>
             </div>
           </button>
         </div>
@@ -2304,6 +2440,7 @@ const App: React.FC = () => {
           onManageServices={() => setView('ADMIN_SERVICES')}
           onBlockSchedule={() => setView('ADMIN_BLOCK_SCHEDULE')}
           onSettings={() => setView('ADMIN_SETTINGS')}
+          onWeeklySchedule={() => setView('ADMIN_WEEKLY_SCHEDULE')}
           onFinance={() => setView('ADMIN_FINANCE')}
 
           onRefresh={fetchAppointments}
@@ -2316,6 +2453,8 @@ const App: React.FC = () => {
         return <AdminBlockScheduleScreen onBack={() => setView('ADMIN_DASHBOARD')} />;
       case 'ADMIN_SETTINGS':
         return <AdminSettingsScreen onBack={() => setView('ADMIN_DASHBOARD')} />;
+      case 'ADMIN_WEEKLY_SCHEDULE':
+        return <AdminWeeklyScheduleScreen onBack={() => setView('ADMIN_DASHBOARD')} />;
       case 'ADMIN_FINANCE':
         return <AdminFinanceScreen onBack={() => setView('ADMIN_DASHBOARD')} />;
       case 'ADMIN_CHAT_LIST':
