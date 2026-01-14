@@ -532,8 +532,10 @@ const SelectDateTimeScreen: React.FC<{
       }
     };
 
-    generateSlots(dayConfig.start_time_1, dayConfig.end_time_1);
-    if (dayConfig.start_time_2 && dayConfig.end_time_2) {
+    if (dayConfig.is_morning_open !== false) {
+      generateSlots(dayConfig.start_time_1, dayConfig.end_time_1);
+    }
+    if (dayConfig.start_time_2 && dayConfig.end_time_2 && dayConfig.is_afternoon_open !== false) {
       generateSlots(dayConfig.start_time_2, dayConfig.end_time_2);
     }
 
@@ -1369,7 +1371,9 @@ const AdminWeeklyScheduleScreen: React.FC<{ onBack: () => void }> = ({ onBack })
       start_time_1: editingDay.start_time_1,
       end_time_1: editingDay.end_time_1,
       start_time_2: editingDay.start_time_2,
-      end_time_2: editingDay.end_time_2
+      end_time_2: editingDay.end_time_2,
+      is_morning_open: editingDay.is_morning_open,
+      is_afternoon_open: editingDay.is_afternoon_open
     }).eq('id', editingDay.id);
 
     if (error) alert('Erro ao salvar: ' + error.message);
@@ -1459,22 +1463,48 @@ const AdminWeeklyScheduleScreen: React.FC<{ onBack: () => void }> = ({ onBack })
           <div className="bg-white dark:bg-surface-dark w-full max-w-sm rounded-3xl p-6 shadow-2xl animate-scale-up">
             <h3 className="font-bold text-xl mb-6 text-slate-900 dark:text-white text-center">Editar {dayNames[editingDay.day_of_week]}</h3>
 
-            <div className="space-y-4">
+            <div className="bg-gray-50 dark:bg-black/20 p-4 rounded-2xl border border-gray-100 dark:border-white/5 space-y-4">
+              {/* Morning Shift */}
               <div>
-                <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Manhã</label>
-                <div className="flex gap-2">
-                  <input type="time" className="flex-1 bg-gray-100 dark:bg-background-dark p-3 rounded-xl font-bold text-center" value={editingDay.start_time_1} onChange={e => setEditingDay({ ...editingDay, start_time_1: e.target.value })} />
-                  <span className="self-center text-gray-400">-</span>
-                  <input type="time" className="flex-1 bg-gray-100 dark:bg-background-dark p-3 rounded-xl font-bold text-center" value={editingDay.end_time_1} onChange={e => setEditingDay({ ...editingDay, end_time_1: e.target.value })} />
+                <div className="flex justify-between items-center mb-2">
+                  <label className="text-xs font-bold text-gray-500 uppercase flex items-center gap-2">
+                    <span className="material-symbols-outlined text-sm">wb_sunny</span>
+                    Manhã
+                  </label>
+                  <button
+                    onClick={() => setEditingDay({ ...editingDay, is_morning_open: !editingDay.is_morning_open })}
+                    className={`w-10 h-5 rounded-full p-0.5 transition-colors ${editingDay.is_morning_open ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'}`}
+                  >
+                    <div className={`h-4 w-4 bg-white rounded-full shadow-sm transition-transform ${editingDay.is_morning_open ? 'translate-x-5' : 'translate-x-0'}`}></div>
+                  </button>
+                </div>
+
+                <div className={`grid grid-cols-2 gap-2 text-center transition-all duration-300 ${!editingDay.is_morning_open && 'opacity-40 grayscale pointer-events-none'}`}>
+                  <input type="time" className="bg-white dark:bg-background-dark p-3 rounded-xl font-bold text-center border border-gray-200 dark:border-white/10" value={editingDay.start_time_1} onChange={e => setEditingDay({ ...editingDay, start_time_1: e.target.value })} />
+                  <input type="time" className="bg-white dark:bg-background-dark p-3 rounded-xl font-bold text-center border border-gray-200 dark:border-white/10" value={editingDay.end_time_1} onChange={e => setEditingDay({ ...editingDay, end_time_1: e.target.value })} />
                 </div>
               </div>
 
+              <div className="h-px bg-gray-200 dark:bg-white/10"></div>
+
+              {/* Afternoon Shift */}
               <div>
-                <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Tarde (Opcional)</label>
-                <div className="flex gap-2">
-                  <input type="time" className="flex-1 bg-gray-100 dark:bg-background-dark p-3 rounded-xl font-bold text-center" value={editingDay.start_time_2 || ''} onChange={e => setEditingDay({ ...editingDay, start_time_2: e.target.value })} />
-                  <span className="self-center text-gray-400">-</span>
-                  <input type="time" className="flex-1 bg-gray-100 dark:bg-background-dark p-3 rounded-xl font-bold text-center" value={editingDay.end_time_2 || ''} onChange={e => setEditingDay({ ...editingDay, end_time_2: e.target.value })} />
+                <div className="flex justify-between items-center mb-2">
+                  <label className="text-xs font-bold text-gray-500 uppercase flex items-center gap-2">
+                    <span className="material-symbols-outlined text-sm">wb_twilight</span>
+                    Tarde
+                  </label>
+                  <button
+                    onClick={() => setEditingDay({ ...editingDay, is_afternoon_open: !editingDay.is_afternoon_open })}
+                    className={`w-10 h-5 rounded-full p-0.5 transition-colors ${editingDay.is_afternoon_open ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'}`}
+                  >
+                    <div className={`h-4 w-4 bg-white rounded-full shadow-sm transition-transform ${editingDay.is_afternoon_open ? 'translate-x-5' : 'translate-x-0'}`}></div>
+                  </button>
+                </div>
+
+                <div className={`grid grid-cols-2 gap-2 text-center transition-all duration-300 ${!editingDay.is_afternoon_open && 'opacity-40 grayscale pointer-events-none'}`}>
+                  <input type="time" className="bg-white dark:bg-background-dark p-3 rounded-xl font-bold text-center border border-gray-200 dark:border-white/10" value={editingDay.start_time_2 || ''} onChange={e => setEditingDay({ ...editingDay, start_time_2: e.target.value })} />
+                  <input type="time" className="bg-white dark:bg-background-dark p-3 rounded-xl font-bold text-center border border-gray-200 dark:border-white/10" value={editingDay.end_time_2 || ''} onChange={e => setEditingDay({ ...editingDay, end_time_2: e.target.value })} />
                 </div>
               </div>
             </div>
