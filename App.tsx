@@ -1,3 +1,4 @@
+import ReloadPrompt from './src/ReloadPrompt';
 
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { AppView, Service, BookingState, Appointment, ChatMessage } from './types';
@@ -2563,6 +2564,7 @@ const App: React.FC = () => {
     <div className="bg-background-light dark:bg-background-dark min-h-screen text-slate-900 dark:text-white font-display transition-colors duration-300">
       {showSuccess && <SuccessOverlay />}
       {renderView()}
+      <ReloadPrompt />
     </div>
   );
 };
