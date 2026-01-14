@@ -1335,16 +1335,21 @@ const AdminWeeklyScheduleScreen: React.FC<{ onBack: () => void }> = ({ onBack })
   const [schedule, setSchedule] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingDay, setEditingDay] = useState<any | null>(null);
+  const [interval, setInterval] = useState('30');
 
   const fetchSchedule = async () => {
-    const { data, error } = await supabase
+    // Fetch Work Hours
+    const { data: wh } = await supabase
       .from('work_hours')
       .select('*')
       .order('day_of_week');
 
-    if (data) {
-      setSchedule(data);
-    }
+    if (wh) setSchedule(wh);
+
+    // Fetch Interval
+    const { data: settingsData } = await supabase.from('settings').select('*').eq('key', 'interval_minutes').single();
+    if (settingsData) setInterval(settingsData.value);
+
     setLoading(false);
   };
 
@@ -1374,6 +1379,11 @@ const AdminWeeklyScheduleScreen: React.FC<{ onBack: () => void }> = ({ onBack })
     }
   };
 
+  const handleSaveInterval = async (newInterval: string) => {
+    setInterval(newInterval);
+    await supabase.from('settings').upsert({ key: 'interval_minutes', value: newInterval });
+  };
+
   const dayNames = ['Domingo', 'Segunda-Feira', 'Terça-Feira', 'Quarta-Feira', 'Quinta-Feira', 'Sexta-Feira', 'Sábado'];
 
   return (
@@ -1385,6 +1395,25 @@ const AdminWeeklyScheduleScreen: React.FC<{ onBack: () => void }> = ({ onBack })
       </header>
 
       <main className="p-4 space-y-4 max-w-md mx-auto w-full pb-24">
+        {/* Interval Setting */}
+        <div className="bg-white dark:bg-surface-dark p-5 rounded-3xl border border-gray-200 dark:border-white/5 shadow-sm">
+          <label className="text-gray-500 dark:text-gray-400 text-xs font-bold uppercase tracking-widest block mb-2">Intervalo entre Cortes</label>
+          <select
+            value={interval}
+            onChange={e => handleSaveInterval(e.target.value)}
+            className="w-full bg-gray-50 dark:bg-background-dark p-3 rounded-xl border border-gray-200 dark:border-white/10 text-slate-900 dark:text-white font-bold outline-none focus:border-primary/50 transition-colors"
+          >
+            <option value="15">15 minutos</option>
+            <option value="20">20 minutos</option>
+            <option value="30">30 minutos</option>
+            <option value="40">40 minutos</option>
+            <option value="45">45 minutos</option>
+            <option value="60">1 hora</option>
+          </select>
+        </div>
+
+        <h3 className="text-[11px] text-gray-500 font-bold uppercase pt-2 px-1">Semana</h3>
+
         {loading ? <div className="text-center p-10">Carregando...</div> : schedule.map(day => (
           <div key={day.id} className={`bg-gray-100 dark:bg-surface-dark rounded-3xl p-5 border ${day.is_open ? 'border-transparent' : 'border-gray-300 opacity-75'} transition-all`}>
             <div className="flex justify-between items-center mb-4">
