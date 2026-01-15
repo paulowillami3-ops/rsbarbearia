@@ -6,6 +6,8 @@ import { SERVICES } from './constants';
 import { supabase } from './src/supabase';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
+import { format, addDays, startOfDay, addMinutes, differenceInMinutes, parseISO, isSameDay } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
 
 const CustomerLoginScreen: React.FC<{ onLogin: (phone: string) => void; onBack: () => void }> = ({ onLogin, onBack }) => {
   const [phone, setPhone] = useState('');
@@ -1708,6 +1710,125 @@ const LoginScreen: React.FC<{ onLogin: () => void; onBack: () => void }> = ({ on
   );
 };
 
+const AdminCalendarView: React.FC<{
+  appointments: Appointment[];
+  selectedDateStr: string;
+  onDateChange: (dateStr: string) => void;
+  onAppointmentClick: (app: Appointment) => void;
+  workHours: any[];
+}> = ({ appointments, selectedDateStr, onDateChange, onAppointmentClick, workHours }) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Constants
+  const START_HOUR = 8;
+  const END_HOUR = 20;
+  const TOTAL_MINUTES = (END_HOUR - START_HOUR) * 60;
+  const PIXELS_PER_MINUTE = 2; // Increased for better visibility (120px per hour)
+
+  // Filter apps for selected date (Robust string comparison)
+  const dayApps = appointments.filter(a => a.date === selectedDateStr && a.status !== 'CANCELLED');
+
+  // Helper to calculate position
+  const getPosition = (timeStr: string, duration: number) => {
+    const [h, m] = timeStr.split(':').map(Number);
+    const startMinutes = (h * 60 + m) - (START_HOUR * 60);
+    return {
+      top: startMinutes * PIXELS_PER_MINUTE,
+      height: duration * PIXELS_PER_MINUTE
+    };
+  };
+
+  const timeSlots = [];
+  for (let h = START_HOUR; h < END_HOUR; h++) {
+    timeSlots.push(h);
+  }
+
+  return (
+    <div className="flex flex-col h-full bg-white dark:bg-surface-dark rounded-xl border border-gray-200 dark:border-white/5 overflow-hidden">
+      {/* Calendar Header */}
+      <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-white/5 bg-gray-50 dark:bg-background-dark">
+        <button onClick={() => {
+          const current = parseISO(selectedDateStr);
+          onDateChange(format(addDays(current, -1), 'yyyy-MM-dd'));
+        }} className="p-2 hover:bg-black/5 dark:hover:bg-white/5 rounded-full text-slate-900 dark:text-white">
+          <span className="material-symbols-outlined">chevron_left</span>
+        </button>
+        <div className="text-center">
+          <h3 className="text-lg font-bold text-slate-900 dark:text-white capitalize">
+            {format(parseISO(selectedDateStr), "EEEE, d 'de' MMMM", { locale: ptBR })}
+          </h3>
+        </div>
+        <button onClick={() => {
+          const current = parseISO(selectedDateStr);
+          onDateChange(format(addDays(current, 1), 'yyyy-MM-dd'));
+        }} className="p-2 hover:bg-black/5 dark:hover:bg-white/5 rounded-full text-slate-900 dark:text-white">
+          <span className="material-symbols-outlined">chevron_right</span>
+        </button>
+      </div>
+
+      {/* Calendar Grid */}
+      <div className="flex-1 overflow-y-auto relative no-scrollbar" style={{ height: '600px' }} ref={containerRef}>
+        <div className="flex w-full relative min-h-full">
+          {/* Time Sidebar */}
+          <div className="w-16 flex-shrink-0 border-r border-gray-200 dark:border-white/5 bg-gray-50/50 dark:bg-background-dark/50 z-10 sticky left-0">
+            {timeSlots.map(h => (
+              <div key={h} className="h-[120px] text-xs font-medium text-gray-500 text-right pr-2 pt-2 border-b border-gray-100 dark:border-white/5 relative">
+                <span className="-top-3 relative">{h}:00</span>
+              </div>
+            ))}
+          </div>
+
+          {/* Events Area */}
+          <div className="flex-1 relative bg-white dark:bg-surface-dark bg-[linear-gradient(to_bottom,transparent_119px,rgba(0,0,0,0.05)_120px)] dark:bg-[linear-gradient(to_bottom,transparent_119px,rgba(255,255,255,0.05)_120px)] bg-[size:100%_120px]">
+            {dayApps.map(app => {
+              const totalDuration = app.services.reduce((sum, s) => sum + s.duration, 0) || 30;
+              const pos = getPosition(app.time, totalDuration);
+
+              return (
+                <div
+                  key={app.id}
+                  onClick={() => onAppointmentClick(app)}
+                  className={`absolute left-2 right-2 rounded-lg p-2 border-l-4 shadow-sm cursor-pointer hover:brightness-95 transition-all
+                      ${app.status === 'COMPLETED' ? 'bg-green-100 border-green-500 text-green-900' :
+                      app.status === 'CONFIRMED' ? 'bg-blue-100 border-blue-500 text-blue-900' :
+                        'bg-yellow-100 border-yellow-500 text-yellow-900'}
+                    `}
+                  style={{ top: `${pos.top}px`, height: `${pos.height}px` }}
+                >
+                  <div className="flex justify-between items-start">
+                    <span className="font-bold text-xs truncate">{app.customerName}</span>
+                    <span className="text-[10px] font-mono opacity-80">{app.time}</span>
+                  </div>
+                  <div className="text-[10px] opacity-90 truncate mt-0.5">
+                    {app.services.map(s => s.name).join(', ')}
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* Current Time Line */}
+            {selectedDateStr === format(new Date(), 'yyyy-MM-dd') && (() => {
+              const now = new Date();
+              const minutes = (now.getHours() * 60 + now.getMinutes()) - (START_HOUR * 60);
+              if (minutes > 0 && minutes < TOTAL_MINUTES) {
+                return (
+                  <div
+                    className="absolute left-0 right-0 border-t-2 border-red-500 z-20 pointer-events-none flex items-center"
+                    style={{ top: `${minutes * PIXELS_PER_MINUTE}px` }}
+                  >
+                    <div className="size-2 bg-red-500 rounded-full -ml-1"></div>
+                  </div>
+                );
+              }
+              return null;
+            })()}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const AdminDashboard: React.FC<{
   appointments: Appointment[];
   onLogout: () => void;
@@ -1722,8 +1843,15 @@ const AdminDashboard: React.FC<{
   setAppointments: React.Dispatch<React.SetStateAction<Appointment[]>>;
 }> = ({ appointments, onLogout, onOpenChat, onManageServices, onBlockSchedule, onSettings, onWeeklySchedule, onFinance, onRefresh, onClients, setAppointments }) => {
   const availableDays = useMemo(() => getNextDays(7), []);
-  const [selectedDateStr, setSelectedDateStr] = useState(availableDays[0].dateStr);
+  const [selectedDateStr, setSelectedDateStr] = useState(availableDays[0].dateStr); // Default to local today string
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<'LIST' | 'CALENDAR'>('LIST');
+
+  // Load WorkHours to pass to calendar if needed for disabled slots visual
+  const [workHours, setWorkHours] = useState<any[]>([]);
+  useEffect(() => {
+    supabase.from('work_hours').select('*').then(({ data }) => { if (data) setWorkHours(data) });
+  }, []);
 
   const selectedDayApps = appointments.filter(a => a.date === selectedDateStr);
 
@@ -1862,77 +1990,123 @@ const AdminDashboard: React.FC<{
           </button>
         </div>
 
-        {/* Date Selector */}
-        <div className="flex gap-2 overflow-x-auto no-scrollbar mb-8 pb-1">
-          {availableDays.map(d => (
-            <button
-              key={d.dateStr}
-              onClick={() => setSelectedDateStr(d.dateStr)}
-              className={`p-3 rounded-xl min-w-[70px] text-center flex flex-col transition-all border ${selectedDateStr === d.dateStr
-                ? 'bg-primary text-white border-primary shadow-lg shadow-primary/20'
-                : 'bg-white dark:bg-surface-dark text-gray-500 border-gray-200 dark:border-white/5 hover:border-gray-300 dark:hover:border-white/10'
-                }`}
-            >
-              <span className={`text-[10px] uppercase font-bold mb-1 ${selectedDateStr === d.dateStr ? 'opacity-90' : 'opacity-60'}`}>
-                {d.isToday ? 'Hoje' : d.label}
-              </span>
-              <span className={`text-xl font-bold ${selectedDateStr === d.dateStr ? 'text-white' : 'text-slate-900 dark:text-gray-300'}`}>{d.dayNum}</span>
+        {/* View Toggle & Header */}
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h3 className="font-bold text-xl text-slate-900 dark:text-white">Visão Geral</h3>
+            <p className="text-gray-500 text-xs">{selectedDateStr === new Date().toISOString().split('T')[0] ? 'Hoje' : formatDateToBRL(selectedDateStr)}</p>
+          </div>
+          <div className="flex bg-gray-100 dark:bg-white/5 p-1 rounded-full">
+            <button onClick={() => setViewMode('LIST')} className={`px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 transition-all ${viewMode === 'LIST' ? 'bg-white dark:bg-surface-dark shadow text-slate-900 dark:text-white' : 'text-gray-400'}`}>
+              <span className="material-symbols-outlined text-base">list</span>
             </button>
-          ))}
-        </div>
-
-        {/* Stats Cards */}
-        <div className="grid grid-cols-2 gap-3 mb-8">
-          <div className="bg-white dark:bg-surface-dark p-5 rounded-3xl border border-gray-200 dark:border-white/5 text-center shadow-sm transition-colors">
-            <span className="text-4xl font-black text-slate-900 dark:text-white">{stats.count}</span>
-            <p className="text-[10px] text-gray-500 uppercase font-bold mt-2 tracking-widest">Agendados</p>
-          </div>
-          <div className="bg-white dark:bg-surface-dark p-5 rounded-3xl border border-gray-200 dark:border-white/5 text-center shadow-sm transition-colors">
-            <span className="text-4xl font-black text-slate-900 dark:text-white">R$ {stats.revenue.toFixed(0)}</span>
-            <p className="text-[10px] text-gray-500 uppercase font-bold mt-2 tracking-widest">Previsão de Faturamento do dia</p>
+            <button onClick={() => setViewMode('CALENDAR')} className={`px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 transition-all ${viewMode === 'CALENDAR' ? 'bg-white dark:bg-surface-dark shadow text-slate-900 dark:text-white' : 'text-gray-400'}`}>
+              <span className="material-symbols-outlined text-base">calendar_view_day</span>
+            </button>
           </div>
         </div>
 
-        <h3 className="text-[11px] text-gray-500 font-bold uppercase mb-5 tracking-widest px-1 flex justify-between items-center">
-          <span>Cronograma</span>
-          <span className="bg-primary/10 text-primary px-2 py-0.5 rounded-full normal-case text-[10px]">{pendingApps.length} agendamentos</span>
-        </h3>
-
-        {/* Appointment List */}
-        <div className="space-y-4">
-          {pendingApps.length === 0 ? (
-            <div className="text-center py-16 bg-white dark:bg-surface-dark/40 rounded-3xl border border-gray-200 dark:border-white/5 border-dashed transition-colors">
-              <span className="material-symbols-outlined text-4xl text-gray-400 dark:text-gray-700 mb-2">event_busy</span>
-              <p className="text-gray-500 text-sm">Sem compromissos pendentes.</p>
-            </div>
-          ) : (
-            pendingApps.map((app) => (
-              <div key={app.id} className="group relative bg-white dark:bg-surface-dark p-5 rounded-3xl border-l-4 border-primary border border-gray-200 dark:border-white/5 hover:border-gray-300 dark:hover:border-white/10 transition-all shadow-sm">
-                <div className="flex justify-between items-center mb-4">
-                  <div className="flex flex-col">
-                    <span className="font-black text-xl text-slate-900 dark:text-white tracking-tight">
-                      {app.time}
-                    </span>
-                    <span className="text-gray-500 text-[10px] font-bold uppercase mt-0.5">
-                      {app.services.reduce((total, s) => total + s.duration, 0)} min de duração
-                    </span>
+        {viewMode === 'CALENDAR' ? (
+          <div className="animate-fade-in relative z-0">
+            <AdminCalendarView
+              appointments={appointments}
+              selectedDateStr={selectedDateStr}
+              onDateChange={setSelectedDateStr}
+              workHours={workHours}
+              onAppointmentClick={(app) => setActiveMenuId(app.id)}
+            />
+            {activeMenuId && (
+              <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm" onClick={() => setActiveMenuId(null)}>
+                <div className="bg-white dark:bg-surface-dark p-6 rounded-2xl w-full max-w-sm shadow-2xl animate-scale-up border border-white/10" onClick={e => e.stopPropagation()}>
+                  <h3 className="font-bold text-lg mb-4 text-slate-900 dark:text-white">Ações do Agendamento</h3>
+                  <div className="space-y-3">
+                    <button onClick={() => handleUpdateStatus(activeMenuId, 'CONFIRMED')} className="w-full p-4 bg-blue-500/10 text-blue-600 rounded-xl font-bold flex items-center gap-3 hover:bg-blue-500/20"><span className="material-symbols-outlined">check</span> Confirmar</button>
+                    <button onClick={() => handleUpdateStatus(activeMenuId, 'COMPLETED')} className="w-full p-4 bg-green-500/10 text-green-600 rounded-xl font-bold flex items-center gap-3 hover:bg-green-500/20"><span className="material-symbols-outlined">done_all</span> Concluir</button>
+                    <button onClick={() => {
+                      const app = appointments.find(a => a.id === activeMenuId);
+                      if (app) handleDeleteAppointment(app.id, app.customerName);
+                      setActiveMenuId(null);
+                    }} className="w-full p-4 bg-red-500/10 text-red-600 rounded-xl font-bold flex items-center gap-3 hover:bg-red-500/20"><span className="material-symbols-outlined">delete</span> Cancelar</button>
                   </div>
-                  <span className="bg-green-500/15 text-green-600 dark:text-green-400 text-[10px] font-bold px-3 py-1 rounded-full uppercase tracking-widest border border-green-500/20">
-                    {app.status === 'CONFIRMED' ? 'Confirmado' : app.status}
-                  </span>
+                  <button onClick={() => setActiveMenuId(null)} className="w-full py-4 mt-2 text-gray-500 font-bold">Fechar</button>
                 </div>
-                <div className="flex gap-4 items-center">
-                  <div className="size-12 rounded-2xl bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-white/5 flex items-center justify-center overflow-hidden shadow-inner transition-colors">
-                    <span className="material-symbols-outlined text-gray-600 text-2xl">person</span>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <h4 className="font-bold text-base text-slate-900 dark:text-white truncate">{app.customerName}</h4>
-                    <p className="text-xs text-gray-500 font-medium truncate opacity-80">
-                      {app.services.map(s => s.name).join(' + ')}
-                    </p>
-                  </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          <>
 
-                  {/* <div className="relative">
+            {/* Date Selector */}
+            <div className="flex gap-2 overflow-x-auto no-scrollbar mb-8 pb-1">
+              {availableDays.map(d => (
+                <button
+                  key={d.dateStr}
+                  onClick={() => setSelectedDateStr(d.dateStr)}
+                  className={`p-3 rounded-xl min-w-[70px] text-center flex flex-col transition-all border ${selectedDateStr === d.dateStr
+                    ? 'bg-primary text-white border-primary shadow-lg shadow-primary/20'
+                    : 'bg-white dark:bg-surface-dark text-gray-500 border-gray-200 dark:border-white/5 hover:border-gray-300 dark:hover:border-white/10'
+                    }`}
+                >
+                  <span className={`text-[10px] uppercase font-bold mb-1 ${selectedDateStr === d.dateStr ? 'opacity-90' : 'opacity-60'}`}>
+                    {d.isToday ? 'Hoje' : d.label}
+                  </span>
+                  <span className={`text-xl font-bold ${selectedDateStr === d.dateStr ? 'text-white' : 'text-slate-900 dark:text-gray-300'}`}>{d.dayNum}</span>
+                </button>
+              ))}
+            </div>
+
+            {/* Stats Cards */}
+            <div className="grid grid-cols-2 gap-3 mb-8">
+              <div className="bg-white dark:bg-surface-dark p-5 rounded-3xl border border-gray-200 dark:border-white/5 text-center shadow-sm transition-colors">
+                <span className="text-4xl font-black text-slate-900 dark:text-white">{stats.count}</span>
+                <p className="text-[10px] text-gray-500 uppercase font-bold mt-2 tracking-widest">Agendados</p>
+              </div>
+              <div className="bg-white dark:bg-surface-dark p-5 rounded-3xl border border-gray-200 dark:border-white/5 text-center shadow-sm transition-colors">
+                <span className="text-4xl font-black text-slate-900 dark:text-white">R$ {stats.revenue.toFixed(0)}</span>
+                <p className="text-[10px] text-gray-500 uppercase font-bold mt-2 tracking-widest">Previsão de Faturamento do dia</p>
+              </div>
+            </div>
+
+            <h3 className="text-[11px] text-gray-500 font-bold uppercase mb-5 tracking-widest px-1 flex justify-between items-center">
+              <span>Cronograma</span>
+              <span className="bg-primary/10 text-primary px-2 py-0.5 rounded-full normal-case text-[10px]">{pendingApps.length} agendamentos</span>
+            </h3>
+
+            {/* Appointment List */}
+            <div className="space-y-4">
+              {pendingApps.length === 0 ? (
+                <div className="text-center py-16 bg-white dark:bg-surface-dark/40 rounded-3xl border border-gray-200 dark:border-white/5 border-dashed transition-colors">
+                  <span className="material-symbols-outlined text-4xl text-gray-400 dark:text-gray-700 mb-2">event_busy</span>
+                  <p className="text-gray-500 text-sm">Sem compromissos pendentes.</p>
+                </div>
+              ) : (
+                pendingApps.map((app) => (
+                  <div key={app.id} className="group relative bg-white dark:bg-surface-dark p-5 rounded-3xl border-l-4 border-primary border border-gray-200 dark:border-white/5 hover:border-gray-300 dark:hover:border-white/10 transition-all shadow-sm">
+                    <div className="flex justify-between items-center mb-4">
+                      <div className="flex flex-col">
+                        <span className="font-black text-xl text-slate-900 dark:text-white tracking-tight">
+                          {app.time}
+                        </span>
+                        <span className="text-gray-500 text-[10px] font-bold uppercase mt-0.5">
+                          {app.services.reduce((total, s) => total + s.duration, 0)} min de duração
+                        </span>
+                      </div>
+                      <span className="bg-green-500/15 text-green-600 dark:text-green-400 text-[10px] font-bold px-3 py-1 rounded-full uppercase tracking-widest border border-green-500/20">
+                        {app.status === 'CONFIRMED' ? 'Confirmado' : app.status}
+                      </span>
+                    </div>
+                    <div className="flex gap-4 items-center">
+                      <div className="size-12 rounded-2xl bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-white/5 flex items-center justify-center overflow-hidden shadow-inner transition-colors">
+                        <span className="material-symbols-outlined text-gray-600 text-2xl">person</span>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <h4 className="font-bold text-base text-slate-900 dark:text-white truncate">{app.customerName}</h4>
+                        <p className="text-xs text-gray-500 font-medium truncate opacity-80">
+                          {app.services.map(s => s.name).join(' + ')}
+                        </p>
+                      </div>
+
+                      {/* <div className="relative">
                     <button
                       onClick={() => setActiveMenuId(activeMenuId === app.id ? null : app.id)}
                       className="size-8 rounded-full hover:bg-gray-100 dark:hover:bg-white/10 flex items-center justify-center text-gray-400 transition-colors"
@@ -1956,12 +2130,12 @@ const AdminDashboard: React.FC<{
                       </div>
                     )}
                   </div> */}
-                </div>
+                    </div>
 
-                {/* Action Buttons Row */}
-                <div className="flex items-center gap-2 mt-4 pt-4 border-t border-gray-100 dark:border-white/5">
-                  <a
-                    href={`https://wa.me/55${app.customerPhone.replace(/\D/g, '')}?text=${encodeURIComponent(`*Essa mensagem é pra lembrar do seu agendamento!*
+                    {/* Action Buttons Row */}
+                    <div className="flex items-center gap-2 mt-4 pt-4 border-t border-gray-100 dark:border-white/5">
+                      <a
+                        href={`https://wa.me/55${app.customerPhone.replace(/\D/g, '')}?text=${encodeURIComponent(`*Essa mensagem é pra lembrar do seu agendamento!*
 
 *Data:* ${app.date.split('-').reverse().join('/')}
 *Horário:* ${app.time}
@@ -1970,63 +2144,65 @@ const AdminDashboard: React.FC<{
 *Cliente:* ${app.customerName}
 
 Dúvidas, responder a essa mensagem!`)}`}
-                    target="_blank"
-                    className="flex-1 h-10 rounded-xl bg-green-500/10 hover:bg-green-500/20 text-green-600 dark:text-green-500 flex items-center justify-center gap-1.5 transition-colors text-xs font-bold uppercase tracking-wide border border-green-500/20"
-                  >
-                    <span className="material-symbols-outlined text-lg">chat</span>
-                    WhatsApp
-                  </a>
-                  <button
-                    onClick={() => handleUpdateStatus(app.id, 'COMPLETED')}
-                    className="flex-1 h-10 rounded-xl bg-primary/10 hover:bg-primary/20 text-primary flex items-center justify-center gap-1.5 transition-colors text-xs font-bold uppercase tracking-wide border border-primary/20"
-                  >
-                    <span className="material-symbols-outlined text-lg">check_circle</span>
-                    Concluir
-                  </button>
-                  <button
-                    onClick={() => {
-                      if (window.confirm('Tem certeza que deseja cancelar?')) handleUpdateStatus(app.id, 'CANCELLED');
-                    }}
-                    className="size-10 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-500 flex items-center justify-center transition-colors border border-red-500/20"
-                    title="Cancelar Agendamento"
-                  >
-                    <span className="material-symbols-outlined text-lg">close</span>
-                  </button>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
+                        target="_blank"
+                        className="flex-1 h-10 rounded-xl bg-green-500/10 hover:bg-green-500/20 text-green-600 dark:text-green-500 flex items-center justify-center gap-1.5 transition-colors text-xs font-bold uppercase tracking-wide border border-green-500/20"
+                      >
+                        <span className="material-symbols-outlined text-lg">chat</span>
+                        WhatsApp
+                      </a>
+                      <button
+                        onClick={() => handleUpdateStatus(app.id, 'COMPLETED')}
+                        className="flex-1 h-10 rounded-xl bg-primary/10 hover:bg-primary/20 text-primary flex items-center justify-center gap-1.5 transition-colors text-xs font-bold uppercase tracking-wide border border-primary/20"
+                      >
+                        <span className="material-symbols-outlined text-lg">check_circle</span>
+                        Concluir
+                      </button>
+                      <button
+                        onClick={() => {
+                          if (window.confirm('Tem certeza que deseja cancelar?')) handleUpdateStatus(app.id, 'CANCELLED');
+                        }}
+                        className="size-10 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-500 flex items-center justify-center transition-colors border border-red-500/20"
+                        title="Cancelar Agendamento"
+                      >
+                        <span className="material-symbols-outlined text-lg">close</span>
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
 
-        {/* Completed Section */}
-        <div className="mt-8 space-y-4 opacity-70">
-          <h3 className="font-bold text-slate-900 dark:text-white flex items-center gap-2">
-            <span className="material-symbols-outlined text-green-500">task_alt</span>
-            Concluídos Hoje ({selectedDayApps.filter(a => a.status === 'COMPLETED').length})
-          </h3>
-          <div className="space-y-3">
-            {selectedDayApps.filter(a => a.status === 'COMPLETED').map(app => (
-              <div key={app.id} className="bg-gray-50 dark:bg-white/5 p-4 rounded-2xl border border-transparent flex justify-between items-center group grayscale hover:grayscale-0 transition-all">
-                <div className="flex items-center gap-3">
-                  <div className="size-10 rounded-full bg-green-100 dark:bg-green-900/20 text-green-600 dark:text-green-400 flex items-center justify-center font-bold">
-                    {app.customerName.charAt(0)}
+            {/* Completed Section */}
+            <div className="mt-8 space-y-4 opacity-70">
+              <h3 className="font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <span className="material-symbols-outlined text-green-500">task_alt</span>
+                Concluídos Hoje ({selectedDayApps.filter(a => a.status === 'COMPLETED').length})
+              </h3>
+              <div className="space-y-3">
+                {selectedDayApps.filter(a => a.status === 'COMPLETED').map(app => (
+                  <div key={app.id} className="bg-gray-50 dark:bg-white/5 p-4 rounded-2xl border border-transparent flex justify-between items-center group grayscale hover:grayscale-0 transition-all">
+                    <div className="flex items-center gap-3">
+                      <div className="size-10 rounded-full bg-green-100 dark:bg-green-900/20 text-green-600 dark:text-green-400 flex items-center justify-center font-bold">
+                        {app.customerName.charAt(0)}
+                      </div>
+                      <div>
+                        <p className="font-bold text-slate-900 dark:text-white strike-through decoration-slate-900/30">{app.customerName}</p>
+                        <p className="text-xs text-gray-500">{app.services.map(s => s.name).join(', ')}</p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <p className="font-bold text-slate-900 dark:text-white">{app.time}</p>
+                      <p className="text-xs text-green-500 font-bold">Concluído</p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="font-bold text-slate-900 dark:text-white strike-through decoration-slate-900/30">{app.customerName}</p>
-                    <p className="text-xs text-gray-500">{app.services.map(s => s.name).join(', ')}</p>
-                  </div>
-                </div>
-                <div className="text-right">
-                  <p className="font-bold text-slate-900 dark:text-white">{app.time}</p>
-                  <p className="text-xs text-green-500 font-bold">Concluído</p>
-                </div>
+                ))}
+                {selectedDayApps.filter(a => a.status === 'COMPLETED').length === 0 && (
+                  <p className="text-sm text-gray-400 italic">Nenhum atendimento concluído hoje.</p>
+                )}
               </div>
-            ))}
-            {selectedDayApps.filter(a => a.status === 'COMPLETED').length === 0 && (
-              <p className="text-sm text-gray-400 italic">Nenhum atendimento concluído hoje.</p>
-            )}
-          </div>
-        </div>
+            </div>
+          </>
+        )}
       </main>
     </div>
   );
