@@ -5,6 +5,7 @@ import { AppView, Service, BookingState, Appointment, ChatMessage } from './type
 import { SERVICES } from './constants';
 import { supabase } from './src/supabase';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
+import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
 
 const CustomerLoginScreen: React.FC<{ onLogin: (phone: string) => void; onBack: () => void }> = ({ onLogin, onBack }) => {
   const [phone, setPhone] = useState('');
@@ -394,7 +395,14 @@ const SelectServicesScreen: React.FC<{
         <div className="space-y-4">
           {services.map(service => (
             <label key={service.id} className={`relative flex gap-4 p-4 rounded-xl bg-white dark:bg-surface-dark border transition-all cursor-pointer ${booking.selectedServices.some(s => s.id === service.id) ? 'border-primary' : 'border-gray-200 dark:border-transparent'} shadow-sm hover:shadow-md`}>
-              <img src={service.imageUrl} className="size-20 rounded-lg object-cover bg-gray-200 dark:bg-gray-800" />
+              <div className="size-20 rounded-lg overflow-hidden bg-gray-200 dark:bg-gray-800 shrink-0">
+                <img
+                  src={service.imageUrl}
+                  onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.parentElement?.classList.add('flex', 'items-center', 'justify-center'); e.currentTarget.parentElement!.innerHTML = '<span class="material-symbols-outlined text-gray-400">image_not_supported</span>'; }}
+                  className="w-full h-full object-cover"
+                  alt={service.name}
+                />
+              </div>
               <div className="flex-1">
                 <h3 className="text-base font-bold text-slate-900 dark:text-white">{service.name}</h3>
                 <p className="text-gray-500 dark:text-gray-400 text-xs line-clamp-2 mt-1">{service.description}</p>
@@ -2036,7 +2044,7 @@ const AdminServicesScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
       .from('services')
       .select('*')
       .eq('is_active', true)
-      .order('name');
+      .order('display_order', { ascending: true });
 
     if (error) console.error(error);
     else if (data) {
@@ -2118,6 +2126,33 @@ const AdminServicesScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
     );
   }
 
+
+  const onDragEnd = async (result: DropResult) => {
+    if (!result.destination) return;
+
+    const items = Array.from(services);
+    const [reorderedItem] = items.splice(result.source.index, 1);
+    items.splice(result.destination.index, 0, reorderedItem);
+
+    setServices(items);
+
+    // Prepare updates
+    const updates = items.map((item, index) => ({
+      id: item.id,
+      name: item.name, // Required for upsert if not minimal, actually update allows partial
+      display_order: index
+    }));
+
+    // Batch update via Promise.all is safest for now, or use upsert if we change strategy.
+    // Supabase JS doesn't support bulk update with different values easily in one query without upsert/json trick.
+    // For specific rows updates, we can just iterate.
+
+    // Ideally use an RPC for this, but simplistic client-side loop is fine for small list ( < 20 services)
+    for (let i = 0; i < updates.length; i++) {
+      await supabase.from('services').update({ display_order: updates[i].display_order }).eq('id', updates[i].id);
+    }
+  };
+
   return (
     <div className="bg-gradient-to-b from-primary/20 to-white dark:bg-background-dark min-h-screen flex flex-col transition-colors">
       <header className="sticky top-0 z-50 p-4 border-b border-gray-200 dark:border-white/5 bg-white/95 dark:bg-background-dark/95 flex items-center justify-between backdrop-blur-md transition-colors">
@@ -2126,19 +2161,41 @@ const AdminServicesScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
         <div className="size-10"></div>
       </header>
       <main className="p-4 space-y-4 max-w-md mx-auto w-full pb-24">
-        {services.map(s => (
-          <div key={s.id} className="bg-white dark:bg-surface-dark p-4 rounded-xl border border-gray-200 dark:border-white/5 flex gap-4 items-center transition-colors">
-            <img src={s.imageUrl} className="size-16 rounded-lg object-cover bg-gray-100 dark:bg-gray-800" />
-            <div className="flex-1">
-              <h3 className="font-bold text-slate-900 dark:text-white">{s.name}</h3>
-              <p className="text-gray-500 dark:text-gray-400 text-xs">R$ {s.price.toFixed(2)} • {s.duration} min</p>
-            </div>
-            <div className="flex flex-col gap-2">
-              <button onClick={() => { setEditingService(s); setIsEditing(true); }} className="size-8 rounded-lg bg-gray-100 dark:bg-white/5 flex items-center justify-center text-blue-500 dark:text-blue-400 transition-colors"><span className="material-symbols-outlined text-sm">edit</span></button>
-              <button onClick={() => handleDelete(s.id)} className="size-8 rounded-lg bg-gray-100 dark:bg-white/5 flex items-center justify-center text-red-500 dark:text-red-400 transition-colors"><span className="material-symbols-outlined text-sm">delete</span></button>
-            </div>
-          </div>
-        ))}
+
+        <DragDropContext onDragEnd={onDragEnd}>
+          <Droppable droppableId="services-list">
+            {(provided) => (
+              <div {...provided.droppableProps} ref={provided.innerRef} className="space-y-4">
+                {services.map((s, index) => (
+                  <Draggable key={s.id} draggableId={String(s.id)} index={index}>
+                    {(provided) => (
+                      <div
+                        ref={provided.innerRef}
+                        {...provided.draggableProps}
+                        className="bg-white dark:bg-surface-dark p-4 rounded-xl border border-gray-200 dark:border-white/5 flex gap-4 items-center transition-colors shadow-sm"
+                      >
+                        <div {...provided.dragHandleProps} className="text-gray-400 hover:text-gray-600 cursor-grab active:cursor-grabbing p-2 mr-2 hover:bg-gray-100 dark:hover:bg-white/5 rounded-lg shrink-0">
+                          <svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="currentColor"><path d="M360-160q-33 0-56.5-23.5T280-240q0-33 23.5-56.5T360-320q33 0 56.5 23.5T440-240q0 33-23.5 56.5T360-160Zm240 0q-33 0-56.5-23.5T520-240q0-33 23.5-56.5T600-320q33 0 56.5 23.5T680-240q0 33-23.5 56.5T600-160ZM360-400q-33 0-56.5-23.5T280-480q0-33 23.5-56.5T360-560q33 0 56.5 23.5T440-480q0 33-23.5 56.5T360-400Zm240 0q-33 0-56.5-23.5T520-480q0-33 23.5-56.5T600-560q33 0 56.5 23.5T680-480q0 33-23.5 56.5T600-400ZM360-640q-33 0-56.5-23.5T280-720q0-33 23.5-56.5T360-800q33 0 56.5 23.5T440-720q0 33-23.5 56.5T360-640Zm240 0q-33 0-56.5-23.5T520-720q0-33 23.5-56.5T600-800q33 0 56.5 23.5T680-720q0 33-23.5 56.5T600-640Z" /></svg>
+                        </div>
+                        <img src={s.imageUrl} className="size-16 rounded-lg object-cover bg-gray-100 dark:bg-gray-800 pointer-events-none" />
+                        <div className="flex-1">
+                          <h3 className="font-bold text-slate-900 dark:text-white">{s.name}</h3>
+                          <p className="text-gray-500 dark:text-gray-400 text-xs">R$ {s.price.toFixed(2)} • {s.duration} min</p>
+                        </div>
+                        <div className="flex flex-col gap-2">
+                          <button onClick={() => { setEditingService(s); setIsEditing(true); }} className="size-8 rounded-lg bg-gray-100 dark:bg-white/5 flex items-center justify-center text-blue-500 dark:text-blue-400 transition-colors"><span className="material-symbols-outlined text-sm">edit</span></button>
+                          <button onClick={() => handleDelete(s.id)} className="size-8 rounded-lg bg-gray-100 dark:bg-white/5 flex items-center justify-center text-red-500 dark:text-red-400 transition-colors"><span className="material-symbols-outlined text-sm">delete</span></button>
+                        </div>
+                      </div>
+                    )}
+                  </Draggable>
+                ))}
+                {provided.placeholder}
+              </div>
+            )}
+          </Droppable>
+        </DragDropContext>
+
       </main>
       <div className="fixed bottom-6 right-6 z-50">
         <button onClick={() => { setEditingService({}); setIsEditing(true); }} className="size-14 rounded-full bg-primary text-white shadow-lg shadow-primary/30 flex items-center justify-center transition-transform active:scale-95">
@@ -2148,6 +2205,7 @@ const AdminServicesScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
     </div>
   );
 };
+
 
 // --- Theme Logic ---
 
@@ -2201,7 +2259,7 @@ const App: React.FC = () => {
 
   /* Refactored fetchServicesList to be reused */
   const fetchServicesList = async () => {
-    const { data } = await supabase.from('services').select('*').eq('is_active', true);
+    const { data } = await supabase.from('services').select('*').eq('is_active', true).order('display_order', { ascending: true });
     if (data) {
       setServices(data.map((s: any) => ({
         ...s,
@@ -2288,7 +2346,9 @@ const App: React.FC = () => {
                 service:services(*)
             ),
             clients(name, phone)
-        `);
+        `)
+      .order('appointment_date', { ascending: true })
+      .order('appointment_time', { ascending: true });
 
     // Client-side filtering for customer (or do it in RLS/query filter if simple)
     // Actually we can filter by client phone join, but for now fetch all and filter is safer if we don't have perfect join filtering setup
