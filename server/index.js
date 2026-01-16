@@ -84,8 +84,75 @@ async function checkAutoCompletion() {
 checkAutoCompletion();
 setInterval(checkAutoCompletion, 60 * 1000);
 
+const webpush = require('web-push');
+
+// Web Push Config
+const publicVapidKey = process.env.VITE_VAPID_PUBLIC_KEY;
+const privateVapidKey = process.env.VAPID_PRIVATE_KEY;
+
+if (publicVapidKey && privateVapidKey) {
+    webpush.setVapidDetails(
+        'mailto:admin@barber.com',
+        publicVapidKey,
+        privateVapidKey
+    );
+}
+
+// --- Check Unread Messages & Send Push ---
+let lastNotifiedMessageId = null;
+
+async function checkUnreadMessages() {
+    // console.log('[Worker] Checking for unread messages...');
+
+    // 1. Get latest unread message from CUSTOMER
+    const { data: messages } = await supabase
+        .from('chat_messages')
+        .select('*')
+        .eq('is_read', false)
+        .eq('sender_type', 'CUSTOMER')
+        .order('sent_at', { ascending: false })
+        .limit(1);
+
+    if (!messages || messages.length === 0) return;
+
+    const latestMsg = messages[0];
+
+    // Avoid spamming same message
+    if (latestMsg.id === lastNotifiedMessageId) return;
+
+    // 2. Get Subscriptions
+    const { data: subs } = await supabase.from('push_subscriptions').select('subscription');
+
+    if (!subs || subs.length === 0) return;
+
+    console.log(`[Worker] New unread message from ${latestMsg.client_id}. Sending push to ${subs.length} subs.`);
+
+    const payload = JSON.stringify({
+        title: 'Nova Mensagem',
+        body: latestMsg.message_text || 'Você recebeu uma nova mensagem.',
+        url: 'https://rsbarbearia.com/admin' // or local url
+    });
+
+    // 3. Send Push
+    for (const subRow of subs) {
+        const subscription = subRow.subscription;
+        try {
+            await webpush.sendNotification(subscription, payload);
+            console.log('[Worker] Push sent successfully.');
+        } catch (err) {
+            console.error('[Worker] Error sending push:', err);
+            // Optional: delete invalid subscription
+        }
+    }
+
+    lastNotifiedMessageId = latestMsg.id;
+}
+
+setInterval(checkUnreadMessages, 5000); // Check every 5s
+
 app.listen(PORT, () => {
     console.log(`Worker Server running on port ${PORT}`);
     console.log(`Connected to Supabase: ${supabaseUrl}`);
+    console.log('Web Push configured.');
 });
 

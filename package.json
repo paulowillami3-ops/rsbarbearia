@@ -11,10 +11,14 @@
   "dependencies": {
     "@hello-pangea/dnd": "^18.0.1",
     "@supabase/supabase-js": "^2.90.1",
+    "cors": "^2.8.5",
     "date-fns": "^4.1.0",
+    "dotenv": "^17.2.3",
+    "express": "^5.2.1",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
-    "recharts": "^3.6.0"
+    "recharts": "^3.6.0",
+    "web-push": "^3.6.7"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
