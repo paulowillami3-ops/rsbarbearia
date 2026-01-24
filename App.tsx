@@ -1435,7 +1435,7 @@ const AdminWeeklyScheduleScreen: React.FC<{ onBack: () => void }> = ({ onBack })
   const [schedule, setSchedule] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingDay, setEditingDay] = useState<any | null>(null);
-  const [interval, setInterval] = useState('30');
+  const [interval, setInterval] = useState('15');
   const [minAdvance, setMinAdvance] = useState('0');
 
   const fetchSchedule = async () => {
