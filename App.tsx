@@ -1996,13 +1996,13 @@ const AdminTVScreen: React.FC<{ appointments: Appointment[]; onBack: () => void;
               const isNow = currentTime >= start && currentTime < end;
 
               return (
-                <div key={app.id} className={`${isNow ? 'bg-yellow-950/40 border-yellow-500 shadow-[0_0_50px_rgba(234,179,8,0.4)] scale-105 z-10' : 'bg-slate-800 border-primary'} rounded-[2rem] p-6 border-l-[12px] shadow-2xl flex flex-col gap-4 relative overflow-hidden group hover:scale-[1.02] transition-all duration-500`}>
+                <div key={app.id} className={`${isNow ? 'bg-yellow-950/40 border-yellow-500 ring-2 ring-yellow-500 shadow-[0_0_50px_rgba(234,179,8,0.4)]' : 'bg-slate-800 border-primary'} rounded-[2rem] p-6 border-l-[12px] shadow-2xl flex flex-col gap-4 relative overflow-hidden transition-all duration-500`}>
                   <div className="absolute top-0 right-0 bg-white/5 px-6 py-3 rounded-bl-3xl">
                     <span className={`font-mono font-black text-3xl tracking-tighter ${isNow ? 'text-yellow-400' : 'text-white'}`}>{app.time.slice(0, 5)}</span>
                   </div>
 
                   <div className="flex items-center gap-4 mt-4">
-                    <div className={`size-20 rounded-2xl bg-gradient-to-br ${isNow ? 'from-yellow-600 to-yellow-800 text-white' : 'from-slate-700 to-slate-800'} border border-white/5 flex items-center justify-center text-3xl font-black shadow-inner`}>
+                    <div className={`size-20 rounded-2xl bg-gradient-to-br ${isNow ? 'from-yellow-600 to-yellow-800 text-white shadow-yellow-900/50' : 'from-slate-700 to-slate-800 shadow-inner'} border border-white/5 flex items-center justify-center text-3xl font-black shadow-lg`}>
                       {app.customerName.charAt(0)}
                     </div>
                     <div className="min-w-0 flex-1">
