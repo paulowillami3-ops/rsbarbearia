@@ -1987,40 +1987,49 @@ const AdminTVScreen: React.FC<{ appointments: Appointment[]; onBack: () => void;
               <h2 className="text-4xl font-bold uppercase tracking-widest text-center">Nenhum agendamento<br />ativo no momento</h2>
             </div>
           ) : (
-            activeApps.map(app => (
-              <div key={app.id} className="bg-slate-800 rounded-[2rem] p-6 border-l-[12px] border-primary shadow-2xl flex flex-col gap-4 relative overflow-hidden group hover:scale-[1.02] transition-transform duration-500">
-                <div className="absolute top-0 right-0 bg-white/5 px-6 py-3 rounded-bl-3xl">
-                  <span className="font-mono font-black text-3xl tracking-tighter text-white">{app.time}</span>
-                </div>
+            activeApps.map(app => {
+              const appTimeParts = app.time.split(':');
+              const start = new Date(currentTime);
+              start.setHours(parseInt(appTimeParts[0]), parseInt(appTimeParts[1]), 0, 0);
+              const duration = app.services.reduce((acc, s) => acc + s.duration, 0);
+              const end = addMinutes(start, duration);
+              const isNow = currentTime >= start && currentTime < end;
 
-                <div className="flex items-center gap-4 mt-4">
-                  <div className="size-20 rounded-2xl bg-gradient-to-br from-slate-700 to-slate-800 border border-white/5 flex items-center justify-center text-3xl font-black shadow-inner">
-                    {app.customerName.charAt(0)}
+              return (
+                <div key={app.id} className={`${isNow ? 'bg-yellow-950/40 border-yellow-500 shadow-[0_0_50px_rgba(234,179,8,0.4)] scale-105 z-10' : 'bg-slate-800 border-primary'} rounded-[2rem] p-6 border-l-[12px] shadow-2xl flex flex-col gap-4 relative overflow-hidden group hover:scale-[1.02] transition-all duration-500`}>
+                  <div className="absolute top-0 right-0 bg-white/5 px-6 py-3 rounded-bl-3xl">
+                    <span className={`font-mono font-black text-3xl tracking-tighter ${isNow ? 'text-yellow-400' : 'text-white'}`}>{app.time.slice(0, 5)}</span>
                   </div>
-                  <div className="min-w-0 flex-1">
-                    <h3 className="text-2xl font-bold truncate text-white leading-tight">{app.customerName}</h3>
-                    <p className="text-gray-400 truncate font-mono text-sm opacity-60 mt-1">{app.customerPhone}</p>
-                  </div>
-                </div>
 
-                <div className="border-t border-white/5 pt-5 mt-auto">
-                  <div className="flex flex-wrap gap-2 mb-4">
-                    {app.services.map(s => (
-                      <span key={s.id} className="bg-primary px-3 py-1.5 rounded-lg text-sm font-bold uppercase tracking-wider text-white shadow-lg shadow-primary/20">
-                        {s.name}
+                  <div className="flex items-center gap-4 mt-4">
+                    <div className={`size-20 rounded-2xl bg-gradient-to-br ${isNow ? 'from-yellow-600 to-yellow-800 text-white' : 'from-slate-700 to-slate-800'} border border-white/5 flex items-center justify-center text-3xl font-black shadow-inner`}>
+                      {app.customerName.charAt(0)}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <h3 className={`text-2xl font-bold truncate leading-tight ${isNow ? 'text-yellow-100' : 'text-white'}`}>{app.customerName}</h3>
+                      <p className={`truncate font-mono text-sm opacity-60 mt-1 ${isNow ? 'text-yellow-200' : 'text-gray-400'}`}>{app.customerPhone}</p>
+                    </div>
+                  </div>
+
+                  <div className="border-t border-white/5 pt-5 mt-auto">
+                    <div className="flex flex-wrap gap-2 mb-4">
+                      {app.services.map(s => (
+                        <span key={s.id} className={`${isNow ? 'bg-yellow-600 text-white shadow-yellow-600/40' : 'bg-primary text-white shadow-primary/20'} px-3 py-1.5 rounded-lg text-sm font-bold uppercase tracking-wider shadow-lg`}>
+                          {s.name}
+                        </span>
+                      ))}
+                    </div>
+                    <div className="flex justify-between items-center bg-black/20 p-3 rounded-xl">
+                      <span className={`text-sm font-bold uppercase tracking-wider flex items-center gap-1 ${isNow ? 'text-yellow-200' : 'text-gray-400'}`}>
+                        <span className="material-symbols-outlined text-base">schedule</span>
+                        {duration} min
                       </span>
-                    ))}
-                  </div>
-                  <div className="flex justify-between items-center bg-black/20 p-3 rounded-xl">
-                    <span className="text-sm font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1">
-                      <span className="material-symbols-outlined text-base">schedule</span>
-                      {app.services.reduce((acc, s) => acc + s.duration, 0)} min
-                    </span>
-                    <span className="text-xl font-black text-green-400">R$ {app.totalPrice.toFixed(2)}</span>
+                      <span className="text-xl font-black text-green-400">R$ {app.totalPrice.toFixed(2)}</span>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
       </main>
