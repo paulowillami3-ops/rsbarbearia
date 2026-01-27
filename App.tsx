@@ -2110,7 +2110,7 @@ const AdminTVScreen: React.FC<{ appointments: Appointment[]; onBack: () => void;
           <div className="bg-white p-4 rounded-2xl flex flex-col items-center text-center shadow-xl border-4 border-primary/20 shrink-0">
             <h3 className="text-slate-900 font-black uppercase tracking-widest text-xs mb-2">Agende Agora</h3>
             <div className="bg-white p-1 rounded-lg mb-2 w-32 h-32">
-              <img src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(window.location.origin)}`} alt="QR Code" className="w-full h-full rounded" />
+              <img src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(import.meta.env.VITE_SITE_URL || window.location.origin)}`} alt="QR Code" className="w-full h-full rounded" />
             </div>
             <p className="text-slate-500 font-bold text-[10px]">Aponte a câmera</p>
           </div>
