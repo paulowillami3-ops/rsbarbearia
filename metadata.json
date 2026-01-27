@@ -1,0 +1,7 @@
+{
+  "name": "RS Barbearia",
+  "description": "App de agendamento completo para barbearia com painéis de cliente e barbeiro.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
