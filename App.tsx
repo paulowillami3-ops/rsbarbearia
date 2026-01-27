@@ -1941,15 +1941,17 @@ const AdminCalendarView: React.FC<{
   );
 };
 
-const AdminTVScreen: React.FC<{ appointments: Appointment[]; onBack: () => void }> = ({ appointments, onBack }) => {
+const AdminTVScreen: React.FC<{ appointments: Appointment[]; onBack: () => void; onRefresh: () => void }> = ({ appointments, onBack, onRefresh }) => {
   const [currentTime, setCurrentTime] = useState(new Date());
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
-    return () => clearInterval(timer);
-  }, []);
+    const refreshTimer = setInterval(() => onRefresh(), 10000); // Refresh every 10s
+    return () => { clearInterval(timer); clearInterval(refreshTimer); };
+  }, [onRefresh]);
 
-  const todayStr = currentTime.toISOString().split('T')[0];
+  // Use date-fns for proper local date formatting
+  const todayStr = format(currentTime, 'yyyy-MM-dd');
 
   const activeApps = appointments
     .filter(a => a.date === todayStr && (a.status === 'CONFIRMED' || a.status === 'PENDING'))
@@ -3058,7 +3060,7 @@ const App: React.FC = () => {
       case 'ADMIN_FINANCE':
         return <AdminFinanceScreen onBack={() => setView('ADMIN_DASHBOARD')} />;
       case 'ADMIN_TV':
-        return <AdminTVScreen appointments={appointments} onBack={() => setView('ADMIN_DASHBOARD')} />;
+        return <AdminTVScreen appointments={appointments} onRefresh={fetchAppointments} onBack={() => setView('ADMIN_DASHBOARD')} />;
       case 'ADMIN_CHAT_LIST':
         return <AdminChatListScreen
           onBack={() => setView('ADMIN_DASHBOARD')}
