@@ -931,166 +931,165 @@ const AdminFinanceScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
             })}
           </div>
 
-          {/* Debug/Info Text confirming filter */}
-          <p className="text-xs text-center text-gray-500 font-mono bg-gray-100 dark:bg-white/5 p-1 rounded">
-            Filtro: {formatDateToBRL(dateRange.start)} até {formatDateToBRL(dateRange.end)} — {rawAppointments.filter(a => a.date >= dateRange.start && a.date <= dateRange.end).length} agendamentos encontrados
-          </p>
+        </div>
+    </div>
+
+
+        {/* Tabs */ }
+  <div className="flex gap-2 p-1 bg-gray-100 dark:bg-white/5 rounded-xl print:hidden">
+    <button onClick={() => setActiveTab('dashboard')} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'dashboard' ? 'bg-white dark:bg-surface-dark shadow text-slate-900 dark:text-white' : 'text-gray-500'}`}>Dashboard</button>
+    <button onClick={() => setActiveTab('expenses')} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'expenses' ? 'bg-white dark:bg-surface-dark shadow text-slate-900 dark:text-white' : 'text-gray-500'}`}>Despesas</button>
+  </div>
+
+  {
+    activeTab === 'dashboard' ? (
+      <div className="space-y-6 animate-fade-in">
+        {/* Metrics Grid */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="bg-white dark:bg-surface-dark p-4 rounded-2xl border border-gray-200 dark:border-white/5 shadow-sm">
+            <p className="text-xs text-gray-500 uppercase font-bold">Faturamento</p>
+            <h3 className="text-2xl font-black text-slate-900 dark:text-white">R$ {stats.revenue.toFixed(2)}</h3>
+            {stats.prevMonthRevenue > 0 && (
+              <p className={`text-xs font-bold mt-1 ${stats.revenue >= stats.prevMonthRevenue ? 'text-green-500' : 'text-red-500'}`}>
+                {stats.revenue >= stats.prevMonthRevenue ? '▲' : '▼'} vs mês anterior
+              </p>
+            )}
+          </div>
+          <div className="bg-white dark:bg-surface-dark p-4 rounded-2xl border border-gray-200 dark:border-white/5 shadow-sm">
+            <p className="text-xs text-gray-500 uppercase font-bold">Lucro Líquido</p>
+            <h3 className={`text-2xl font-black ${stats.profit >= 0 ? 'text-green-500' : 'text-red-500'}`}>R$ {stats.profit.toFixed(2)}</h3>
+            <p className="text-xs text-gray-400 mt-1">Margem: {stats.revenue > 0 ? ((stats.profit / stats.revenue) * 100).toFixed(0) : 0}%</p>
+          </div>
+          <div className="bg-white dark:bg-surface-dark p-4 rounded-2xl border border-gray-200 dark:border-white/5 shadow-sm">
+            <p className="text-xs text-gray-500 uppercase font-bold">Ticket Médio</p>
+            <h3 className="text-2xl font-black text-blue-500">R$ {stats.ticketAverage.toFixed(2)}</h3>
+            <p className="text-xs text-gray-400 mt-1">por atendimento</p>
+          </div>
+          <div className="bg-white dark:bg-surface-dark p-4 rounded-2xl border border-gray-200 dark:border-white/5 shadow-sm">
+            <p className="text-xs text-gray-500 uppercase font-bold">LTV (Lifetime Value)</p>
+            <h3 className="text-2xl font-black text-purple-500">R$ {stats.ltv.toFixed(2)}</h3>
+            <p className="text-xs text-gray-400 mt-1">Média por cliente</p>
+          </div>
         </div>
 
-
-        {/* Tabs */}
-        <div className="flex gap-2 p-1 bg-gray-100 dark:bg-white/5 rounded-xl print:hidden">
-          <button onClick={() => setActiveTab('dashboard')} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'dashboard' ? 'bg-white dark:bg-surface-dark shadow text-slate-900 dark:text-white' : 'text-gray-500'}`}>Dashboard</button>
-          <button onClick={() => setActiveTab('expenses')} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'expenses' ? 'bg-white dark:bg-surface-dark shadow text-slate-900 dark:text-white' : 'text-gray-500'}`}>Despesas</button>
-        </div>
-
-        {activeTab === 'dashboard' ? (
-          <div className="space-y-6 animate-fade-in">
-            {/* Metrics Grid */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div className="bg-white dark:bg-surface-dark p-4 rounded-2xl border border-gray-200 dark:border-white/5 shadow-sm">
-                <p className="text-xs text-gray-500 uppercase font-bold">Faturamento</p>
-                <h3 className="text-2xl font-black text-slate-900 dark:text-white">R$ {stats.revenue.toFixed(2)}</h3>
-                {stats.prevMonthRevenue > 0 && (
-                  <p className={`text-xs font-bold mt-1 ${stats.revenue >= stats.prevMonthRevenue ? 'text-green-500' : 'text-red-500'}`}>
-                    {stats.revenue >= stats.prevMonthRevenue ? '▲' : '▼'} vs mês anterior
-                  </p>
-                )}
-              </div>
-              <div className="bg-white dark:bg-surface-dark p-4 rounded-2xl border border-gray-200 dark:border-white/5 shadow-sm">
-                <p className="text-xs text-gray-500 uppercase font-bold">Lucro Líquido</p>
-                <h3 className={`text-2xl font-black ${stats.profit >= 0 ? 'text-green-500' : 'text-red-500'}`}>R$ {stats.profit.toFixed(2)}</h3>
-                <p className="text-xs text-gray-400 mt-1">Margem: {stats.revenue > 0 ? ((stats.profit / stats.revenue) * 100).toFixed(0) : 0}%</p>
-              </div>
-              <div className="bg-white dark:bg-surface-dark p-4 rounded-2xl border border-gray-200 dark:border-white/5 shadow-sm">
-                <p className="text-xs text-gray-500 uppercase font-bold">Ticket Médio</p>
-                <h3 className="text-2xl font-black text-blue-500">R$ {stats.ticketAverage.toFixed(2)}</h3>
-                <p className="text-xs text-gray-400 mt-1">por atendimento</p>
-              </div>
-              <div className="bg-white dark:bg-surface-dark p-4 rounded-2xl border border-gray-200 dark:border-white/5 shadow-sm">
-                <p className="text-xs text-gray-500 uppercase font-bold">LTV (Lifetime Value)</p>
-                <h3 className="text-2xl font-black text-purple-500">R$ {stats.ltv.toFixed(2)}</h3>
-                <p className="text-xs text-gray-400 mt-1">Média por cliente</p>
-              </div>
-            </div>
-
-            {/* Main Charts Row */}
-            <div className="grid md:grid-cols-2 gap-6">
-              {/* Trend Chart */}
-              <div className="bg-white dark:bg-surface-dark p-6 rounded-2xl border border-gray-200 dark:border-white/5 shadow-sm min-h-[300px]">
-                <h3 className="font-bold text-slate-900 dark:text-white mb-4">Tendência de Receita</h3>
-                <div className="h-[250px] w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={stats.revenueHistory}>
-                      <CartesianGrid strokeDasharray="3 3" opacity={0.1} />
-                      <XAxis dataKey="date" stroke="#888" fontSize={12} tickLine={false} axisLine={false} />
-                      <YAxis stroke="#888" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(value) => `R$${value}`} />
-                      <RechartsTooltip
-                        contentStyle={{ backgroundColor: '#222', borderRadius: '8px', border: 'none', color: '#fff' }}
-                        formatter={(value: number) => [`R$ ${value.toFixed(2)}`, 'Receita']}
-                      />
-                      <Bar dataKey="total" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-
-              {/* Seasonality Chart */}
-              <div className="bg-white dark:bg-surface-dark p-6 rounded-2xl border border-gray-200 dark:border-white/5 shadow-sm min-h-[300px]">
-                <h3 className="font-bold text-slate-900 dark:text-white mb-4">📊 Fluxo de Agendamentos (Filtro Atual)</h3>
-                <div className="h-[250px] w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={stats.seasonalData}>
-                      <CartesianGrid strokeDasharray="3 3" opacity={0.1} />
-                      <XAxis dataKey="day" stroke="#888" fontSize={12} tickLine={false} axisLine={false} />
-                      <YAxis stroke="#888" fontSize={12} tickLine={false} axisLine={false} />
-                      <RechartsTooltip
-                        contentStyle={{ backgroundColor: '#222', borderRadius: '8px', border: 'none', color: '#fff' }}
-                        formatter={(value: number) => [`${value}`, 'Agendamentos']}
-                      />
-                      <Bar dataKey="count" fill="#FF8042" radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-            </div>
-
-            {/* Tables Grid */}
-            <div className="grid md:grid-cols-2 gap-6">
-              {/* Top Services */}
-              <div className="bg-white dark:bg-surface-dark p-6 rounded-2xl border border-gray-200 dark:border-white/5 shadow-sm">
-                <h3 className="font-bold text-slate-900 dark:text-white mb-4">Top Serviços</h3>
-                <div className="space-y-3">
-                  {stats.serviceRanking.map((s: any, idx: number) => (
-                    <div key={s.name} className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className={`size-6 rounded-full flex items-center justify-center text-xs font-bold ${idx === 0 ? 'bg-yellow-100 text-yellow-600' : 'bg-gray-100 text-gray-500'}`}>
-                          {idx + 1}
-                        </div>
-                        <span className="text-sm font-medium text-slate-900 dark:text-white">{s.name}</span>
-                      </div>
-                      <span className="text-sm font-bold text-gray-500">{s.count} agend.</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Top Clients */}
-              <div className="bg-white dark:bg-surface-dark p-6 rounded-2xl border border-gray-200 dark:border-white/5 shadow-sm">
-                <h3 className="font-bold text-slate-900 dark:text-white mb-4">Top 5 Clientes</h3>
-                <div className="space-y-3">
-                  {stats.topClients.map((c: any, idx: number) => (
-                    <div key={c.name} className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className={`size-8 rounded-full flex items-center justify-center text-xs font-bold bg-primary/10 text-primary`}>
-                          {c.name.charAt(0)}
-                        </div>
-                        <span className="text-sm font-medium text-slate-900 dark:text-white truncate max-w-[120px]">{c.name}</span>
-                      </div>
-                      <span className="text-sm font-bold text-green-600">R$ {c.total.toFixed(0)}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
+        {/* Main Charts Row */}
+        <div className="grid md:grid-cols-2 gap-6">
+          {/* Trend Chart */}
+          <div className="bg-white dark:bg-surface-dark p-6 rounded-2xl border border-gray-200 dark:border-white/5 shadow-sm min-h-[300px]">
+            <h3 className="font-bold text-slate-900 dark:text-white mb-4">Tendência de Receita</h3>
+            <div className="h-[250px] w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={stats.revenueHistory}>
+                  <CartesianGrid strokeDasharray="3 3" opacity={0.1} />
+                  <XAxis dataKey="date" stroke="#888" fontSize={12} tickLine={false} axisLine={false} />
+                  <YAxis stroke="#888" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(value) => `R$${value}`} />
+                  <RechartsTooltip
+                    contentStyle={{ backgroundColor: '#222', borderRadius: '8px', border: 'none', color: '#fff' }}
+                    formatter={(value: number) => [`R$ ${value.toFixed(2)}`, 'Receita']}
+                  />
+                  <Bar dataKey="total" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
             </div>
           </div>
-        ) : (
-          <div className="space-y-6 animate-fade-in">
-            <div className="bg-white dark:bg-surface-dark p-6 rounded-2xl border border-gray-200 dark:border-white/5 shadow-sm print:hidden">
-              <h3 className="font-bold text-slate-900 dark:text-white mb-4">Adicionar Despesa</h3>
-              <div className="grid grid-cols-2 gap-3 mb-3">
-                <input value={desc} onChange={e => setDesc(e.target.value)} placeholder="Descrição (ex: Energia)" className="col-span-2 bg-gray-50 dark:bg-white/5 p-3 rounded-lg border border-gray-200 dark:border-white/10 text-slate-900 dark:text-white" />
-                <input type="number" value={amount} onChange={e => setAmount(e.target.value)} placeholder="Valor (R$)" className="bg-gray-50 dark:bg-white/5 p-3 rounded-lg border border-gray-200 dark:border-white/10 text-slate-900 dark:text-white" />
-                <select value={category} onChange={e => setCategory(e.target.value)} className="bg-gray-50 dark:bg-white/5 p-3 rounded-lg border border-gray-200 dark:border-white/10 text-slate-900 dark:text-white">
-                  <option>Produto</option>
-                  <option>Infraestrutura</option>
-                  <option>Marketing</option>
-                  <option>Pessoal</option>
-                  <option>Outros</option>
-                </select>
-              </div>
-              <button onClick={handleAddExpense} className="w-full bg-primary text-white font-bold py-3 rounded-xl shadow-lg shadow-primary/20">Adicionar Despesa</button>
-            </div>
 
+          {/* Seasonality Chart */}
+          <div className="bg-white dark:bg-surface-dark p-6 rounded-2xl border border-gray-200 dark:border-white/5 shadow-sm min-h-[300px]">
+            <h3 className="font-bold text-slate-900 dark:text-white mb-4">📊 Fluxo de Agendamentos (Filtro Atual)</h3>
+            <div className="h-[250px] w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={stats.seasonalData}>
+                  <CartesianGrid strokeDasharray="3 3" opacity={0.1} />
+                  <XAxis dataKey="day" stroke="#888" fontSize={12} tickLine={false} axisLine={false} />
+                  <YAxis stroke="#888" fontSize={12} tickLine={false} axisLine={false} />
+                  <RechartsTooltip
+                    contentStyle={{ backgroundColor: '#222', borderRadius: '8px', border: 'none', color: '#fff' }}
+                    formatter={(value: number) => [`${value}`, 'Agendamentos']}
+                  />
+                  <Bar dataKey="count" fill="#FF8042" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        </div>
+
+        {/* Tables Grid */}
+        <div className="grid md:grid-cols-2 gap-6">
+          {/* Top Services */}
+          <div className="bg-white dark:bg-surface-dark p-6 rounded-2xl border border-gray-200 dark:border-white/5 shadow-sm">
+            <h3 className="font-bold text-slate-900 dark:text-white mb-4">Top Serviços</h3>
             <div className="space-y-3">
-              {expenses.map(e => (
-                <div key={e.id} className="bg-white dark:bg-surface-dark p-4 rounded-xl border border-gray-200 dark:border-white/5 flex items-center justify-between">
-                  <div>
-                    <p className="font-bold text-slate-900 dark:text-white">{e.description}</p>
-                    <p className="text-xs text-gray-500">{e.category} • {formatDateToBRL(e.date)}</p>
-                  </div>
+              {stats.serviceRanking.map((s: any, idx: number) => (
+                <div key={s.name} className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    <span className="font-bold text-red-500">- R$ {e.amount.toFixed(2)}</span>
-                    <button onClick={() => handleDeleteExpense(e.id)} className="size-8 rounded-full hover:bg-red-50 dark:hover:bg-red-900/20 text-red-500 flex items-center justify-center print:hidden"><span className="material-symbols-outlined text-lg">delete</span></button>
+                    <div className={`size-6 rounded-full flex items-center justify-center text-xs font-bold ${idx === 0 ? 'bg-yellow-100 text-yellow-600' : 'bg-gray-100 text-gray-500'}`}>
+                      {idx + 1}
+                    </div>
+                    <span className="text-sm font-medium text-slate-900 dark:text-white">{s.name}</span>
                   </div>
+                  <span className="text-sm font-bold text-gray-500">{s.count} agend.</span>
                 </div>
               ))}
             </div>
           </div>
-        )}
 
-      </main>
+          {/* Top Clients */}
+          <div className="bg-white dark:bg-surface-dark p-6 rounded-2xl border border-gray-200 dark:border-white/5 shadow-sm">
+            <h3 className="font-bold text-slate-900 dark:text-white mb-4">Top 5 Clientes</h3>
+            <div className="space-y-3">
+              {stats.topClients.map((c: any, idx: number) => (
+                <div key={c.name} className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className={`size-8 rounded-full flex items-center justify-center text-xs font-bold bg-primary/10 text-primary`}>
+                      {c.name.charAt(0)}
+                    </div>
+                    <span className="text-sm font-medium text-slate-900 dark:text-white truncate max-w-[120px]">{c.name}</span>
+                  </div>
+                  <span className="text-sm font-bold text-green-600">R$ {c.total.toFixed(0)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    ) : (
+    <div className="space-y-6 animate-fade-in">
+      <div className="bg-white dark:bg-surface-dark p-6 rounded-2xl border border-gray-200 dark:border-white/5 shadow-sm print:hidden">
+        <h3 className="font-bold text-slate-900 dark:text-white mb-4">Adicionar Despesa</h3>
+        <div className="grid grid-cols-2 gap-3 mb-3">
+          <input value={desc} onChange={e => setDesc(e.target.value)} placeholder="Descrição (ex: Energia)" className="col-span-2 bg-gray-50 dark:bg-white/5 p-3 rounded-lg border border-gray-200 dark:border-white/10 text-slate-900 dark:text-white" />
+          <input type="number" value={amount} onChange={e => setAmount(e.target.value)} placeholder="Valor (R$)" className="bg-gray-50 dark:bg-white/5 p-3 rounded-lg border border-gray-200 dark:border-white/10 text-slate-900 dark:text-white" />
+          <select value={category} onChange={e => setCategory(e.target.value)} className="bg-gray-50 dark:bg-white/5 p-3 rounded-lg border border-gray-200 dark:border-white/10 text-slate-900 dark:text-white">
+            <option>Produto</option>
+            <option>Infraestrutura</option>
+            <option>Marketing</option>
+            <option>Pessoal</option>
+            <option>Outros</option>
+          </select>
+        </div>
+        <button onClick={handleAddExpense} className="w-full bg-primary text-white font-bold py-3 rounded-xl shadow-lg shadow-primary/20">Adicionar Despesa</button>
+      </div>
+
+      <div className="space-y-3">
+        {expenses.map(e => (
+          <div key={e.id} className="bg-white dark:bg-surface-dark p-4 rounded-xl border border-gray-200 dark:border-white/5 flex items-center justify-between">
+            <div>
+              <p className="font-bold text-slate-900 dark:text-white">{e.description}</p>
+              <p className="text-xs text-gray-500">{e.category} • {formatDateToBRL(e.date)}</p>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="font-bold text-red-500">- R$ {e.amount.toFixed(2)}</span>
+              <button onClick={() => handleDeleteExpense(e.id)} className="size-8 rounded-full hover:bg-red-50 dark:hover:bg-red-900/20 text-red-500 flex items-center justify-center print:hidden"><span className="material-symbols-outlined text-lg">delete</span></button>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
+  )
+  }
+
+      </main >
+    </div >
   );
 };
 
