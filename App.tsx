@@ -833,13 +833,15 @@ const AdminFinanceScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
       count: count
     }));
 
+    console.log('Recalculating Stats for:', dateRange.start, 'found', filteredApps.length);
+
     return {
       revenue,
       expenses: totalExpenses,
       profit,
       ticketAverage,
       projection,
-      prevMonthRevenue,
+      prevMonthRevenue: prevRevenue,
       revenueHistory,
       serviceRanking,
       topClients,
