@@ -725,7 +725,8 @@ const AdminFinanceScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
     revenueHistory: [],
     serviceRanking: [],
     topClients: [],
-    expenseDistribution: []
+    seasonalData: [], // New
+    ltv: 0 // New
   });
 
   const [expenses, setExpenses] = useState<any[]>([]);
@@ -762,12 +763,13 @@ const AdminFinanceScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
 
   useEffect(() => { loadData(); }, []);
 
-  // Recalculate when dateRange or data changes
   useEffect(() => {
-    processStats(rawAppointments, expenses, dateRange);
-  }, [dateRange, rawAppointments, expenses]);
+    // Debug log to verify updates
+    console.log('AdminFinanceScreen: Stats updated', stats);
+  }, [stats]);
 
   const processStats = (apps: any[], exps: any[], range: { start: string, end: string }) => {
+    console.log('Processing Stats with', apps.length, 'appointments');
     // Filter by Date Range
     const filteredApps = apps.filter(a => a.date >= range.start && a.date <= range.end);
     const filteredExps = exps.filter(e => e.date >= range.start && e.date <= range.end);
@@ -831,6 +833,26 @@ const AdminFinanceScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
       .sort((a, b) => b.total - a.total)
       .slice(0, 5);
 
+    // 8. LTV (Lifetime Value) - Based on ALL data
+    const allUniqueClients = new Set(apps.map(a => a.client_id)).size;
+    const allTimeRevenue = apps.reduce((sum, a) => sum + a.total_price, 0);
+    const ltv = allUniqueClients > 0 ? allTimeRevenue / allUniqueClients : 0;
+
+    // 9. Traffic by Day of Week (Filtered by Range)
+    const weekCounts = { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 };
+
+    // Changing from 'apps' to 'filteredApps' to respect the selected month/range
+    filteredApps.forEach(a => {
+      const day = parseISO(a.date).getDay(); // 0-6
+      weekCounts[day as keyof typeof weekCounts] += 1;
+    });
+
+    const daysLabel = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+    const seasonalData = Object.entries(weekCounts).map(([day, count]) => ({
+      day: daysLabel[Number(day)],
+      count: count
+    }));
+
     setStats({
       revenue,
       expenses: totalExpenses,
@@ -840,9 +862,19 @@ const AdminFinanceScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
       prevMonthRevenue: prevRevenue,
       revenueHistory,
       serviceRanking,
-      topClients
+      topClients,
+      ltv,
+      seasonalData
     });
   };
+
+  const handleMonthFilter = (monthOffset: number) => {
+    const today = new Date();
+    const targetDate = new Date(today.getFullYear(), monthOffset, 1);
+    const start = format(startOfDay(targetDate), 'yyyy-MM-01');
+    const end = format(addDays(new Date(targetDate.getFullYear(), targetDate.getMonth() + 1, 0), 0), 'yyyy-MM-dd');
+    setDateRange({ start, end });
+  }
 
   const handleAddExpense = async () => {
     if (!desc || !amount) return alert('Preencha descrição e valor');
@@ -883,17 +915,34 @@ const AdminFinanceScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
 
       <main className="p-4 space-y-6 max-w-4xl mx-auto w-full pb-24 print:max-w-none print:pb-0">
 
-        {/* Date Filter */}
-        <div className="bg-white dark:bg-surface-dark p-4 rounded-xl border border-gray-200 dark:border-white/5 shadow-sm flex flex-wrap gap-4 items-center print:hidden">
-          <div className="flex-1 min-w-[150px]">
-            <label className="text-xs font-bold text-gray-500 uppercase">Início</label>
-            <input type="date" value={dateRange.start} onChange={e => setDateRange({ ...dateRange, start: e.target.value })} className="w-full bg-gray-50 dark:bg-white/5 rounded-lg p-2 text-slate-900 dark:text-white border border-gray-200 dark:border-white/10" />
+        {/* Date Filter & Quick Filters */}
+        <div className="space-y-3 print:hidden">
+          <div className="bg-white dark:bg-surface-dark p-4 rounded-xl border border-gray-200 dark:border-white/5 shadow-sm flex flex-wrap gap-4 items-center">
+            <div className="flex-1 min-w-[150px]">
+              <label className="text-xs font-bold text-gray-500 uppercase">Início</label>
+              <input type="date" value={dateRange.start} onChange={e => setDateRange({ ...dateRange, start: e.target.value })} className="w-full bg-gray-50 dark:bg-white/5 rounded-lg p-2 text-slate-900 dark:text-white border border-gray-200 dark:border-white/10" />
+            </div>
+            <div className="flex-1 min-w-[150px]">
+              <label className="text-xs font-bold text-gray-500 uppercase">Fim</label>
+              <input type="date" value={dateRange.end} onChange={e => setDateRange({ ...dateRange, end: e.target.value })} className="w-full bg-gray-50 dark:bg-white/5 rounded-lg p-2 text-slate-900 dark:text-white border border-gray-200 dark:border-white/10" />
+            </div>
           </div>
-          <div className="flex-1 min-w-[150px]">
-            <label className="text-xs font-bold text-gray-500 uppercase">Fim</label>
-            <input type="date" value={dateRange.end} onChange={e => setDateRange({ ...dateRange, end: e.target.value })} className="w-full bg-gray-50 dark:bg-white/5 rounded-lg p-2 text-slate-900 dark:text-white border border-gray-200 dark:border-white/10" />
+
+          {/* Quick Month Selectors */}
+          <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
+            {['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'].map((m, idx) => (
+              <button key={m} onClick={() => handleMonthFilter(idx)} className={`px-4 py-2 border rounded-lg text-xs font-bold transition-colors whitespace-nowrap ${new Date(dateRange.start).getMonth() === idx && new Date(dateRange.start).getFullYear() === new Date().getFullYear() ? 'bg-primary text-white border-primary' : 'bg-white dark:bg-white/5 border-gray-200 dark:border-white/10 hover:bg-gray-50 dark:hover:bg-white/10 text-slate-900 dark:text-white'}`}>
+                {m}
+              </button>
+            ))}
           </div>
+
+          {/* Debug/Info Text confirming filter */}
+          <p className="text-xs text-center text-gray-500 font-mono bg-gray-100 dark:bg-white/5 p-1 rounded">
+            Filtro: {formatDateToBRL(dateRange.start)} até {formatDateToBRL(dateRange.end)} — {rawAppointments.filter(a => a.date >= dateRange.start && a.date <= dateRange.end).length} agendamentos encontrados
+          </p>
         </div>
+
 
         {/* Tabs */}
         <div className="flex gap-2 p-1 bg-gray-100 dark:bg-white/5 rounded-xl print:hidden">
@@ -925,28 +974,50 @@ const AdminFinanceScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
                 <p className="text-xs text-gray-400 mt-1">por atendimento</p>
               </div>
               <div className="bg-white dark:bg-surface-dark p-4 rounded-2xl border border-gray-200 dark:border-white/5 shadow-sm">
-                <p className="text-xs text-gray-500 uppercase font-bold">Projeção (Mês)</p>
-                <h3 className="text-2xl font-black text-orange-500">R$ {stats.projection.toFixed(2)}</h3>
-                <p className="text-xs text-gray-400 mt-1">Estimado</p>
+                <p className="text-xs text-gray-500 uppercase font-bold">LTV (Lifetime Value)</p>
+                <h3 className="text-2xl font-black text-purple-500">R$ {stats.ltv.toFixed(2)}</h3>
+                <p className="text-xs text-gray-400 mt-1">Média por cliente</p>
               </div>
             </div>
 
-            {/* Main Chart */}
-            <div className="bg-white dark:bg-surface-dark p-6 rounded-2xl border border-gray-200 dark:border-white/5 shadow-sm min-h-[300px]">
-              <h3 className="font-bold text-slate-900 dark:text-white mb-4">Tendência de Receita</h3>
-              <div className="h-[250px] w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={stats.revenueHistory}>
-                    <CartesianGrid strokeDasharray="3 3" opacity={0.1} />
-                    <XAxis dataKey="date" stroke="#888" fontSize={12} tickLine={false} axisLine={false} />
-                    <YAxis stroke="#888" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(value) => `R$${value}`} />
-                    <RechartsTooltip
-                      contentStyle={{ backgroundColor: '#222', borderRadius: '8px', border: 'none', color: '#fff' }}
-                      formatter={(value: number) => [`R$ ${value.toFixed(2)}`, 'Receita']}
-                    />
-                    <Bar dataKey="total" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
+            {/* Main Charts Row */}
+            <div className="grid md:grid-cols-2 gap-6">
+              {/* Trend Chart */}
+              <div className="bg-white dark:bg-surface-dark p-6 rounded-2xl border border-gray-200 dark:border-white/5 shadow-sm min-h-[300px]">
+                <h3 className="font-bold text-slate-900 dark:text-white mb-4">Tendência de Receita</h3>
+                <div className="h-[250px] w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={chartData.revenueHistory}>
+                      <CartesianGrid strokeDasharray="3 3" opacity={0.1} />
+                      <XAxis dataKey="date" stroke="#888" fontSize={12} tickLine={false} axisLine={false} />
+                      <YAxis stroke="#888" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(value) => `R$${value}`} />
+                      <RechartsTooltip
+                        contentStyle={{ backgroundColor: '#222', borderRadius: '8px', border: 'none', color: '#fff' }}
+                        formatter={(value: number) => [`R$ ${value.toFixed(2)}`, 'Receita']}
+                      />
+                      <Bar dataKey="total" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              {/* Seasonality Chart */}
+              <div className="bg-white dark:bg-surface-dark p-6 rounded-2xl border border-gray-200 dark:border-white/5 shadow-sm min-h-[300px]">
+                <h3 className="font-bold text-slate-900 dark:text-white mb-4">📊 Fluxo de Agendamentos (Filtro Atual)</h3>
+                <div className="h-[250px] w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={chartData.seasonalData}>
+                      <CartesianGrid strokeDasharray="3 3" opacity={0.1} />
+                      <XAxis dataKey="day" stroke="#888" fontSize={12} tickLine={false} axisLine={false} />
+                      <YAxis stroke="#888" fontSize={12} tickLine={false} axisLine={false} />
+                      <RechartsTooltip
+                        contentStyle={{ backgroundColor: '#222', borderRadius: '8px', border: 'none', color: '#fff' }}
+                        formatter={(value: number) => [`${value}`, 'Agendamentos']}
+                      />
+                      <Bar dataKey="count" fill="#FF8042" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
               </div>
             </div>
 
