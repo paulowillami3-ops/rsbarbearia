@@ -955,11 +955,25 @@ const AdminFinanceScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
 
           {/* Quick Month Selectors */}
           <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
-            {['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'].map((m, idx) => (
-              <button key={m} onClick={() => handleMonthFilter(idx)} className={`px-4 py-2 border rounded-lg text-xs font-bold transition-colors whitespace-nowrap ${new Date(dateRange.start).getMonth() === idx && new Date(dateRange.start).getFullYear() === new Date().getFullYear() ? 'bg-primary text-white border-primary' : 'bg-white dark:bg-white/5 border-gray-200 dark:border-white/10 hover:bg-gray-50 dark:hover:bg-white/10 text-slate-900 dark:text-white'}`}>
-                {m}
-              </button>
-            ))}
+            {['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'].map((m, idx) => {
+              // Fix: Parse manually to avoid Timezone issues with new Date("YYYY-MM-DD")
+              const [y, M] = dateRange.start.split('-').map(Number);
+              const currentYear = new Date().getFullYear();
+              const isActive = (M - 1) === idx && y === currentYear;
+
+              return (
+                <button
+                  key={m}
+                  onClick={() => handleMonthFilter(idx)}
+                  className={`px-4 py-2 border rounded-lg text-xs font-bold transition-colors whitespace-nowrap ${isActive
+                    ? 'bg-primary text-white border-primary'
+                    : 'bg-white dark:bg-white/5 border-gray-200 dark:border-white/10 hover:bg-gray-50 dark:hover:bg-white/10 text-slate-900 dark:text-white'
+                    }`}
+                >
+                  {m}
+                </button>
+              );
+            })}
           </div>
 
           {/* Debug/Info Text confirming filter */}
