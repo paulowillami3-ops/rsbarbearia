@@ -1308,7 +1308,7 @@ const MyAppointmentsScreen: React.FC<{
                     <span className="text-xl font-bold text-slate-900 dark:text-white">{app.date.split('-')[2]}</span>
                   </div>
                   <div>
-                    <h3 className="font-bold text-sm text-slate-900 dark:text-white">{app.services[0].name} {app.services.length > 1 ? `+ ${app.services.length - 1} serviço` : ''}</h3>
+                    <h3 className="font-bold text-sm text-slate-900 dark:text-white">{app.services?.[0]?.name || 'Serviço não especificado'} {app.services?.length > 1 ? `+ ${app.services.length - 1} serviço` : ''}</h3>
                     <div className="flex flex-col gap-1 mt-2">
                       <p className="text-gray-500 dark:text-gray-400 text-xs flex items-center gap-1"><span className="material-symbols-outlined text-[14px]">calendar_month</span> {formatDateToBRL(app.date)}</p>
                       <p className="text-gray-500 dark:text-gray-400 text-xs flex items-center gap-1"><span className="material-symbols-outlined text-[14px]">schedule</span> {app.time}</p>
@@ -1319,10 +1319,15 @@ const MyAppointmentsScreen: React.FC<{
                   <span className="font-bold text-slate-900 dark:text-white">R$ {app.totalPrice.toFixed(2)}</span>
                   {activeTab === 'upcoming' && (
                     <button
-                      onClick={() => {
+                      onClick={async () => {
                         if (window.confirm('Deseja realmente cancelar este agendamento?')) {
-                          fetch(`/api/appointments/${app.id}`, { method: 'DELETE' })
-                            .then(() => onRefresh());
+                          const { error } = await supabase.from('appointments').delete().eq('id', app.id);
+                          if (error) {
+                            console.error('Erro ao cancelar:', error);
+                            alert('Não foi possível cancelar o agendamento.');
+                          } else {
+                            onRefresh();
+                          }
                         }
                       }}
                       className="text-primary text-xs font-bold uppercase flex items-center gap-1 hover:opacity-80 transition-opacity"
