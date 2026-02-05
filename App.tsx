@@ -715,19 +715,7 @@ const AdminFinanceScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
     end: format(startOfDay(new Date()), 'yyyy-MM-dd')
   });
 
-  const [stats, setStats] = useState<any>({
-    revenue: 0,
-    expenses: 0,
-    profit: 0,
-    ticketAverage: 0,
-    projection: 0,
-    prevMonthRevenue: 0,
-    revenueHistory: [],
-    serviceRanking: [],
-    topClients: [],
-    seasonalData: [], // New
-    ltv: 0 // New
-  });
+  // No local 'stats' state. We use derived state (useMemo) for instant updates.
 
   const [expenses, setExpenses] = useState<any[]>([]);
   const [rawAppointments, setRawAppointments] = useState<any[]>([]);
@@ -757,22 +745,17 @@ const AdminFinanceScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
         clientName: a.clients?.name || 'Cliente'
       }));
       setRawAppointments(mappedApps);
-      processStats(mappedApps, expData || [], dateRange);
+      // No processStats call here. React will auto-calculate via useMemo.
     }
   };
 
   useEffect(() => { loadData(); }, []);
 
-  useEffect(() => {
-    // Debug log to verify updates
-    console.log('AdminFinanceScreen: Stats updated', stats);
-  }, [stats]);
-
-  const processStats = (apps: any[], exps: any[], range: { start: string, end: string }) => {
-    console.log('Processing Stats with', apps.length, 'appointments');
+  // --- DERIVED STATE (STATS) ---
+  const stats = useMemo(() => {
     // Filter by Date Range
-    const filteredApps = apps.filter(a => a.date >= range.start && a.date <= range.end);
-    const filteredExps = exps.filter(e => e.date >= range.start && e.date <= range.end);
+    const filteredApps = rawAppointments.filter(a => a.date >= dateRange.start && a.date <= dateRange.end);
+    const filteredExps = expenses.filter(e => e.date >= dateRange.start && e.date <= dateRange.end);
 
     // 1. Revenue & Expenses
     const revenue = filteredApps.reduce((sum, a) => sum + a.total_price, 0);
@@ -785,7 +768,7 @@ const AdminFinanceScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
 
     // 3. Projection (Current Month)
     const today = new Date();
-    const isCurrentMonth = range.start.substring(0, 7) === today.toISOString().substring(0, 7);
+    const isCurrentMonth = dateRange.start.substring(0, 7) === today.toISOString().substring(0, 7);
     let projection = 0;
     if (isCurrentMonth) {
       const daysPassed = today.getDate();
@@ -796,9 +779,9 @@ const AdminFinanceScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
     }
 
     // 4. Comparison (Previous Month)
-    const prevStart = format(addDays(parseISO(range.start), -30), 'yyyy-MM-dd');
-    const prevEnd = format(addDays(parseISO(range.end), -30), 'yyyy-MM-dd');
-    const prevRevenue = apps
+    const prevStart = format(addDays(parseISO(dateRange.start), -30), 'yyyy-MM-dd');
+    const prevEnd = format(addDays(parseISO(dateRange.end), -30), 'yyyy-MM-dd');
+    const prevRevenue = rawAppointments
       .filter(a => a.date >= prevStart && a.date <= prevEnd)
       .reduce((sum, a) => sum + a.total_price, 0);
 
@@ -834,42 +817,11 @@ const AdminFinanceScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
       .slice(0, 5);
 
     // 8. LTV (Lifetime Value) - Based on ALL data
-    const allUniqueClients = new Set(apps.map(a => a.client_id)).size;
-    const allTimeRevenue = apps.reduce((sum, a) => sum + a.total_price, 0);
+    const allUniqueClients = new Set(rawAppointments.map(a => a.client_id)).size;
+    const allTimeRevenue = rawAppointments.reduce((sum, a) => sum + a.total_price, 0);
     const ltv = allUniqueClients > 0 ? allTimeRevenue / allUniqueClients : 0;
 
-    // 9. Traffic by Day of Week (Filtered by Range) - THIS IS MOVED TO useMemo
-    // const weekCounts = { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 };
-    // filteredApps.forEach(a => {
-    //   const day = parseISO(a.date).getDay(); // 0-6
-    //   weekCounts[day as keyof typeof weekCounts] += 1;
-    // });
-    // const daysLabel = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
-    // const seasonalData = Object.entries(weekCounts).map(([day, count]) => ({
-    //   day: daysLabel[Number(day)],
-    //   count: count
-    // }));
-
-    setStats({
-      revenue,
-      expenses: totalExpenses,
-      profit,
-      ticketAverage,
-      projection,
-      prevMonthRevenue: prevRevenue,
-      revenueHistory: [], // No longer calculated here
-      serviceRanking,
-      topClients,
-      ltv,
-      seasonalData: [] // No longer calculated here
-    });
-  };
-
-  // Memoized Chart Data - Recalculates immediately when dateRange or rawAppointments changes
-  const chartData = useMemo(() => {
-    const filteredApps = rawAppointments.filter(a => a.date >= dateRange.start && a.date <= dateRange.end);
-
-    // 1. Seasonal Data (Traffic by Day of Week)
+    // 9. Seasonal Data (Traffic by Day of Week)
     const weekCounts = { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 };
     filteredApps.forEach(a => {
       const day = parseISO(a.date).getDay();
@@ -881,17 +833,20 @@ const AdminFinanceScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
       count: count
     }));
 
-    // 2. Revenue History
-    const dailyMap: any = {};
-    filteredApps.forEach(a => {
-      dailyMap[a.date] = (dailyMap[a.date] || 0) + a.total_price;
-    });
-    const revenueHistory = Object.entries(dailyMap)
-      .map(([date, total]) => ({ date: format(parseISO(date), 'dd/MM'), total }))
-      .sort((a, b) => a.date.localeCompare(b.date));
-
-    return { seasonalData, revenueHistory };
-  }, [rawAppointments, dateRange]);
+    return {
+      revenue,
+      expenses: totalExpenses,
+      profit,
+      ticketAverage,
+      projection,
+      prevMonthRevenue,
+      revenueHistory,
+      serviceRanking,
+      topClients,
+      ltv,
+      seasonalData
+    };
+  }, [rawAppointments, expenses, dateRange]);
 
   const handleMonthFilter = (monthOffset: number) => {
     const today = new Date();
@@ -1026,7 +981,7 @@ const AdminFinanceScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
                 <h3 className="font-bold text-slate-900 dark:text-white mb-4">Tendência de Receita</h3>
                 <div className="h-[250px] w-full">
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={chartData.revenueHistory}>
+                    <BarChart data={stats.revenueHistory}>
                       <CartesianGrid strokeDasharray="3 3" opacity={0.1} />
                       <XAxis dataKey="date" stroke="#888" fontSize={12} tickLine={false} axisLine={false} />
                       <YAxis stroke="#888" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(value) => `R$${value}`} />
@@ -1045,7 +1000,7 @@ const AdminFinanceScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
                 <h3 className="font-bold text-slate-900 dark:text-white mb-4">📊 Fluxo de Agendamentos (Filtro Atual)</h3>
                 <div className="h-[250px] w-full">
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={chartData.seasonalData}>
+                    <BarChart data={stats.seasonalData}>
                       <CartesianGrid strokeDasharray="3 3" opacity={0.1} />
                       <XAxis dataKey="day" stroke="#888" fontSize={12} tickLine={false} axisLine={false} />
                       <YAxis stroke="#888" fontSize={12} tickLine={false} axisLine={false} />
