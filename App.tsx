@@ -8,12 +8,9 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
 import { format, addDays, startOfDay, addMinutes, differenceInMinutes, parseISO, isSameDay } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { formatDateToBRL } from './src/utils';
 
-const formatDateToBRL = (dateStr: string) => {
-  if (!dateStr) return '';
-  const [year, month, day] = dateStr.split('-');
-  return `${day}/${month}/${year}`;
-};
+
 
 const CustomerLoginScreen: React.FC<{ onLogin: (phone: string) => void; onBack: () => void }> = ({ onLogin, onBack }) => {
   const [phone, setPhone] = useState('');
@@ -213,11 +210,7 @@ const getNextDays = (count: number) => {
   return days;
 };
 
-const formatDateToBRL = (dateStr: string) => {
-  if (!dateStr) return '';
-  const [year, month, day] = dateStr.split('-');
-  return `${day}/${month}/${year}`;
-};
+
 
 const SuccessOverlay: React.FC = () => (
   <div className="fixed inset-0 z-[100] flex items-center justify-center bg-primary/90 backdrop-blur-md animate-fade-in px-6">
