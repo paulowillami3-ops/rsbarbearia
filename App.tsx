@@ -838,20 +838,17 @@ const AdminFinanceScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
     const allTimeRevenue = apps.reduce((sum, a) => sum + a.total_price, 0);
     const ltv = allUniqueClients > 0 ? allTimeRevenue / allUniqueClients : 0;
 
-    // 9. Traffic by Day of Week (Filtered by Range)
-    const weekCounts = { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 };
-
-    // Changing from 'apps' to 'filteredApps' to respect the selected month/range
-    filteredApps.forEach(a => {
-      const day = parseISO(a.date).getDay(); // 0-6
-      weekCounts[day as keyof typeof weekCounts] += 1;
-    });
-
-    const daysLabel = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
-    const seasonalData = Object.entries(weekCounts).map(([day, count]) => ({
-      day: daysLabel[Number(day)],
-      count: count
-    }));
+    // 9. Traffic by Day of Week (Filtered by Range) - THIS IS MOVED TO useMemo
+    // const weekCounts = { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 };
+    // filteredApps.forEach(a => {
+    //   const day = parseISO(a.date).getDay(); // 0-6
+    //   weekCounts[day as keyof typeof weekCounts] += 1;
+    // });
+    // const daysLabel = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+    // const seasonalData = Object.entries(weekCounts).map(([day, count]) => ({
+    //   day: daysLabel[Number(day)],
+    //   count: count
+    // }));
 
     setStats({
       revenue,
@@ -860,13 +857,41 @@ const AdminFinanceScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
       ticketAverage,
       projection,
       prevMonthRevenue: prevRevenue,
-      revenueHistory,
+      revenueHistory: [], // No longer calculated here
       serviceRanking,
       topClients,
       ltv,
-      seasonalData
+      seasonalData: [] // No longer calculated here
     });
   };
+
+  // Memoized Chart Data - Recalculates immediately when dateRange or rawAppointments changes
+  const chartData = useMemo(() => {
+    const filteredApps = rawAppointments.filter(a => a.date >= dateRange.start && a.date <= dateRange.end);
+
+    // 1. Seasonal Data (Traffic by Day of Week)
+    const weekCounts = { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 };
+    filteredApps.forEach(a => {
+      const day = parseISO(a.date).getDay();
+      weekCounts[day as keyof typeof weekCounts] += 1;
+    });
+    const daysLabel = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+    const seasonalData = Object.entries(weekCounts).map(([day, count]) => ({
+      day: daysLabel[Number(day)],
+      count: count
+    }));
+
+    // 2. Revenue History
+    const dailyMap: any = {};
+    filteredApps.forEach(a => {
+      dailyMap[a.date] = (dailyMap[a.date] || 0) + a.total_price;
+    });
+    const revenueHistory = Object.entries(dailyMap)
+      .map(([date, total]) => ({ date: format(parseISO(date), 'dd/MM'), total }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+
+    return { seasonalData, revenueHistory };
+  }, [rawAppointments, dateRange]);
 
   const handleMonthFilter = (monthOffset: number) => {
     const today = new Date();
