@@ -435,6 +435,16 @@ const SelectServicesScreen: React.FC<{
     });
   };
 
+  const formatPhoneBr = (v: string) => {
+    const numbers = v.replace(/\D/g, '').slice(0, 11);
+    if (!numbers) return '';
+    if (numbers.length <= 2) return `(${numbers}`;
+    if (numbers.length <= 3) return `(${numbers.slice(0, 2)}) ${numbers.slice(2)}`;
+    // (XX) 9 XXXX-XXXX
+    if (numbers.length <= 7) return `(${numbers.slice(0, 2)}) ${numbers.slice(2, 3)} ${numbers.slice(3)}`;
+    return `(${numbers.slice(0, 2)}) ${numbers.slice(2, 3)} ${numbers.slice(3, 7)}-${numbers.slice(7)}`;
+  };
+
   const totalPrice = booking.selectedServices.reduce((sum, s) => sum + s.price, 0);
 
   return (
@@ -455,25 +465,107 @@ const SelectServicesScreen: React.FC<{
             type="tel"
             placeholder="(00) 00000-0000"
             value={booking.customerPhone}
-            onChange={(e) => {
-              const val = e.target.value;
-              setBooking(prev => ({ ...prev, customerPhone: val }));
-              if (val.length >= 8) {
-                // Debounce lookup could be better, but simple is ok for now
-                // Debounce lookup could be better, but simple is ok for now
-                supabase.from('clients')
-                  .select('name')
-                  .eq('phone', val)
-                  .single()
-                  .then(({ data }) => {
-                    if (data && data.name) {
-                      setBooking(prev => ({ ...prev, customerName: data.name }));
-                    }
-                  });
+            onChange={async (e) => {
+              const raw = e.target.value;
+              const formatted = formatPhoneBr(raw);
+              const digits = formatted.replace(/\D/g, '');
+
+              setBooking(prev => ({ ...prev, customerPhone: formatted }));
+
+              if (digits.length >= 10) {
+                // Now that DB is clean, simple eq('phone', digits) is enough
+                const { data: client } = await supabase.from('clients')
+                  .select('*')
+                  .eq('phone', digits)
+                  .single();
+
+                if (client) {
+                  // Fetch subscriptions separately to avoid 406 errors with nested joins
+                  const { data: subs } = await supabase.from('user_subscriptions')
+                    .select('*, subscription_plans(*)')
+                    .eq('client_id', client.id);
+
+                  const activeSub = subs?.find((s: any) => s.status === 'APPROVED');
+                  let subData;
+                  if (activeSub) {
+                    const plan = activeSub.subscription_plans;
+
+                    // 1. Fetch Plan services with individual limits
+                    const { data: ps } = await supabase.from('plan_services').select('service_id, monthly_limit').eq('plan_id', plan.id);
+                    const serviceLimits: Record<string, number> = {};
+                    ps?.forEach(s => { serviceLimits[String(s.service_id)] = s.monthly_limit; });
+                    const allowedIds = ps?.map(s => String(s.service_id)) || [];
+
+                    // 2. Fetch all appointments this month to calculate usage
+                    const startOfMonth = format(new Date(), 'yyyy-MM-01');
+                    const { data: monthApps } = await supabase
+                      .from('appointments')
+                      .select('id, services')
+                      .eq('client_id', client.id)
+                      .gte('appointment_date', startOfMonth)
+                      .eq('status', 'COMPLETED');
+
+                    // 3. Fetch Service Component mapping to "unpack" combos
+                    const { data: sc } = await supabase.from('service_components').select('*');
+                    const componentsMap: Record<string, string[]> = {};
+                    sc?.forEach(item => {
+                      if (!componentsMap[String(item.parent_service_id)]) componentsMap[String(item.parent_service_id)] = [];
+                      componentsMap[String(item.parent_service_id)].push(String(item.component_service_id));
+                    });
+
+                    // 4. Calculate real usage per service ID
+                    const usage: Record<string, number> = {};
+                    monthApps?.forEach(app => {
+                      const appServices = app.services || [];
+                      appServices.forEach((s: any) => {
+                        const sId = String(s.id);
+                        if (componentsMap[sId]) {
+                          // It is a combo, increment components
+                          componentsMap[sId].forEach(compId => {
+                            usage[compId] = (usage[compId] || 0) + 1;
+                          });
+                        } else {
+                          // Individual service
+                          usage[sId] = (usage[sId] || 0) + 1;
+                        }
+                      });
+                    });
+
+                    subData = {
+                      planName: plan?.name || 'Assinatura',
+                      cutsUsed: monthApps?.length || 0, // Keep for legacy if needed
+                      cutsLimit: plan?.monthly_limit || 0, // Keep for legacy
+                      serviceLimits,
+                      serviceUsage: usage,
+                      allowedServices: allowedIds,
+                      isActive: true
+                    };
+                  }
+                  setBooking(prev => ({
+                    ...prev,
+                    customerName: client.name,
+                    clientSubscription: subData
+                  }));
+                } else {
+                  setBooking(prev => ({ ...prev, clientSubscription: undefined }));
+                }
+              } else {
+                setBooking(prev => ({ ...prev, clientSubscription: undefined }));
               }
             }}
             className="w-full rounded-lg bg-white dark:bg-surface-dark border border-gray-200 dark:border-white/10 px-4 py-3 text-sm text-slate-900 dark:text-white focus:ring-primary focus:border-primary placeholder:text-gray-400"
           />
+          {booking.clientSubscription?.isActive && (
+            <div className="bg-amber-500/10 border border-amber-500/20 p-3 rounded-xl flex items-center justify-between animate-fade-in transition-colors">
+              <div className="flex items-center gap-2 text-amber-600 dark:text-amber-500">
+                <span className="material-symbols-outlined filled">crown</span>
+                <span className="text-sm font-bold">{booking.clientSubscription.planName}</span>
+              </div>
+              <span className="text-xs font-bold text-amber-700 dark:text-amber-400 uppercase tracking-wider">
+                Plano Ativo
+              </span>
+            </div>
+          )}
           <input
             type="text"
             placeholder="Seu nome completo"
@@ -497,7 +589,42 @@ const SelectServicesScreen: React.FC<{
                 <h3 className="text-base font-bold text-slate-900 dark:text-white">{service.name}</h3>
                 <p className="text-gray-500 dark:text-gray-400 text-xs line-clamp-2 mt-1">{service.description}</p>
                 <div className="flex justify-between mt-2">
-                  <span className="text-primary font-bold text-sm">R$ {service.price.toFixed(2)}</span>
+                  <span className="text-primary font-bold text-sm">
+                    {(() => {
+                      const isSub = booking.clientSubscription?.isActive;
+                      const isAllowed = booking.clientSubscription?.allowedServices?.includes(service.id);
+
+                      if (isSub && isAllowed) {
+                        return (
+                          <span className="text-amber-600 dark:text-amber-500 flex items-center gap-1">
+                            <span className="material-symbols-outlined text-sm filled">check_circle</span>
+                            {(() => {
+                              const isSelected = booking.selectedServices.some(s => s.id === service.id);
+
+                              // Check if it's a combo or individual
+                              // For simplicity in the UI counter, we show the status of the service itself IF it has a direct limit
+                              // OR if it's a combo, we could show something more complex, but let's stick to the "basic" service limit for now.
+                              const limit = booking.clientSubscription!.serviceLimits[service.id] || 0;
+                              const currentUsed = booking.clientSubscription!.serviceUsage[service.id] || 0;
+
+                              if (limit > 0) {
+                                if (isSelected) {
+                                  const selectedCountBefore = booking.selectedServices
+                                    .slice(0, booking.selectedServices.findIndex(s => s.id === service.id))
+                                    .filter(s => s.id === service.id).length;
+                                  return `${currentUsed + selectedCountBefore + 1}/${limit}`;
+                                } else {
+                                  return `${currentUsed}/${limit}`;
+                                }
+                              }
+                              return "Incluso";
+                            })()}
+                          </span>
+                        );
+                      }
+                      return `R$ ${service.price.toFixed(2)}`;
+                    })()}
+                  </span>
                   <span className="text-gray-500 text-xs flex items-center gap-1"><span className="material-symbols-outlined text-sm">schedule</span> {service.duration} min</span>
                 </div>
               </div>
@@ -514,8 +641,27 @@ const SelectServicesScreen: React.FC<{
       <footer className="fixed bottom-0 w-full bg-white/95 dark:bg-surface-dark/95 backdrop-blur-lg border-t border-gray-100 dark:border-white/5 p-5 pb-8 transition-colors">
         <div className="max-w-md mx-auto flex items-center justify-between gap-4">
           <div className="flex flex-col">
-            <span className="text-gray-500 dark:text-gray-400 text-xs">Total estimado</span>
-            <span className="text-2xl font-bold text-primary">R$ {totalPrice.toFixed(2)}</span>
+            <span className="text-gray-500 dark:text-gray-400 text-xs uppercase font-bold tracking-tighter">
+              Total estimado
+            </span>
+            <span className="text-2xl font-bold text-primary">
+              {(() => {
+                const sub = booking.clientSubscription;
+                if (!sub?.isActive) return `R$ ${totalPrice.toFixed(2)}`;
+                // Calculate real cost: free for plan services within limit, price for others
+                const limits = sub.serviceLimits || {};
+                const usage = { ...(sub.serviceUsage || {}) };
+                const price = booking.selectedServices.reduce((sum, s) => {
+                  const limit = limits[s.id];
+                  if (limit !== undefined && limit > 0) {
+                    const used = usage[s.id] || 0;
+                    if (used < limit) { usage[s.id] = used + 1; return sum; }
+                  }
+                  return sum + s.price;
+                }, 0);
+                return `R$ ${price.toFixed(2)}`;
+              })()}
+            </span>
           </div>
           <button
             disabled={booking.selectedServices.length === 0 || !booking.customerName}
@@ -751,6 +897,7 @@ const AdminFinanceScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
 
   const [expenses, setExpenses] = useState<any[]>([]);
   const [rawAppointments, setRawAppointments] = useState<any[]>([]);
+  const [rawSubscriptions, setRawSubscriptions] = useState<any[]>([]);
 
   // Expenses Inputs
   const [desc, setDesc] = useState('');
@@ -777,7 +924,21 @@ const AdminFinanceScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
         clientName: a.clients?.name || 'Cliente'
       }));
       setRawAppointments(mappedApps);
-      // No processStats call here. React will auto-calculate via useMemo.
+    }
+
+    // 3. Fetch Approved Subscriptions
+    const { data: subData } = await supabase
+      .from('user_subscriptions')
+      .select('*, plan:subscription_plans(price)')
+      .eq('status', 'APPROVED');
+
+    if (subData) {
+      const mappedSubs = subData.map((s: any) => ({
+        ...s,
+        date: s.approved_at ? s.approved_at.split('T')[0] : s.created_at.split(' ')[0],
+        price: Number(s.plan?.price || 0)
+      }));
+      setRawSubscriptions(mappedSubs);
     }
   };
 
@@ -788,10 +949,13 @@ const AdminFinanceScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
     // Filter by Date Range
     const filteredApps = rawAppointments.filter(a => a.date >= dateRange.start && a.date <= dateRange.end);
     const filteredExps = expenses.filter(e => e.date >= dateRange.start && e.date <= dateRange.end);
+    const filteredSubs = rawSubscriptions.filter(s => s.date >= dateRange.start && s.date <= dateRange.end);
 
     // 1. Revenue & Expenses
-    const revenue = filteredApps.reduce((sum, a) => sum + a.total_price, 0);
-    const totalExpenses = filteredExps.reduce((sum, e) => sum + e.amount, 0);
+    const appointmentRevenue = filteredApps.reduce((sum, a) => sum + Number(a.total_price), 0);
+    const subscriptionRevenue = filteredSubs.reduce((sum, s) => sum + s.price, 0);
+    const revenue = appointmentRevenue + subscriptionRevenue;
+    const totalExpenses = filteredExps.reduce((sum, e) => sum + Number(e.amount), 0);
     const profit = revenue - totalExpenses;
 
     // 2. Ticket Average
@@ -1198,7 +1362,37 @@ const ReviewScreen: React.FC<{
   onConfirm: () => void;
   onBack: () => void;
 }> = ({ booking, onConfirm, onBack }) => {
-  const totalPrice = booking.selectedServices.reduce((sum, s) => sum + s.price, 0);
+  const isSubscriber = booking.clientSubscription?.isActive;
+  const serviceLimits = booking.clientSubscription?.serviceLimits || {};
+  const serviceUsage = booking.clientSubscription?.serviceUsage || {};
+
+  // Helper: is a service covered by the plan within limits?
+  // For combos, check if ALL component services are within limits.
+  // We track running usage to handle multiple selections in same booking.
+  const runningUsage = { ...serviceUsage };
+  const serviceIsFree: Record<string, boolean> = {};
+  if (isSubscriber) {
+    booking.selectedServices.forEach(s => {
+      const limit = serviceLimits[s.id];
+      if (limit !== undefined && limit > 0) {
+        const used = runningUsage[s.id] || 0;
+        if (used < limit) {
+          serviceIsFree[s.id] = true;
+          runningUsage[s.id] = used + 1;
+        } else {
+          serviceIsFree[s.id] = false;
+        }
+      } else {
+        serviceIsFree[s.id] = false;
+      }
+    });
+  }
+
+  const totalPrice = booking.selectedServices.reduce((sum, s) => {
+    return serviceIsFree[s.id] ? sum : sum + s.price;
+  }, 0);
+
+  const hasFreeServices = Object.values(serviceIsFree).some(v => v);
   return (
     <div className="bg-gradient-to-b from-primary/20 to-white dark:bg-background-dark min-h-screen flex flex-col pb-24 transition-colors">
       <header className="sticky top-0 z-50 flex items-center p-4 bg-white/95 dark:bg-background-dark/95 border-b border-gray-200 dark:border-white/5 transition-colors">
@@ -1218,6 +1412,12 @@ const ReviewScreen: React.FC<{
             <div>
               <span className="text-[10px] text-gray-500 uppercase font-bold">Cliente</span>
               <p className="font-medium text-sm text-slate-900 dark:text-white">{booking.customerName} • {booking.customerPhone}</p>
+              {booking.clientSubscription?.isActive && (
+                <div className="flex items-center gap-1 text-amber-600 font-bold text-[10px] mt-0.5">
+                  <span className="material-symbols-outlined text-[12px] filled">crown</span>
+                  {booking.clientSubscription.planName}
+                </div>
+              )}
             </div>
           </div>
           <div className="p-4 flex gap-4 items-center border-t border-gray-100 dark:border-white/5 transition-colors">
@@ -1231,20 +1431,42 @@ const ReviewScreen: React.FC<{
         <section className="bg-white dark:bg-surface-dark rounded-2xl border border-gray-200 dark:border-white/5 p-5 shadow-sm transition-colors">
           <h3 className="text-sm font-bold mb-4 flex items-center gap-2 uppercase tracking-wider text-slate-900 dark:text-white"><span className="material-symbols-outlined text-primary text-xl">receipt_long</span> Resumo</h3>
           <div className="space-y-4">
-            {booking.selectedServices.map(s => (
+            {booking.selectedServices.map((s, idx) => (
               <div key={s.id} className="flex justify-between text-sm text-slate-900 dark:text-white">
                 <div>
                   <p className="font-bold">{s.name}</p>
                   <span className="text-xs text-gray-500">{s.duration} min</span>
                 </div>
-                <p className="font-bold">R$ {s.price.toFixed(2)}</p>
+                {serviceIsFree[s.id] ? (
+                  <p className="font-bold text-amber-600">
+                    {(() => {
+                      const limit = serviceLimits[s.id] || 0;
+                      // count how many of this service come before (idx) in the selected list
+                      const idxInSelection = booking.selectedServices.slice(0, idx).filter(sv => sv.id === s.id).length;
+                      const used = serviceUsage[s.id] || 0;
+                      return limit > 0 ? `${used + idxInSelection + 1}/${limit}` : 'Incluso';
+                    })()}
+                  </p>
+                ) : (
+                  <p className="font-bold">R$ {s.price.toFixed(2)}</p>
+                )}
               </div>
             ))}
           </div>
-          <div className="my-5 border-t border-gray-200 dark:border-white/10 border-dashed"></div>
-          <div className="flex justify-between items-center">
-            <p className="text-gray-500 font-medium">Total a pagar</p>
-            <p className="text-2xl font-extrabold text-slate-900 dark:text-white">R$ {totalPrice.toFixed(2)}</p>
+          <div className="mt-6 pt-4 border-t border-gray-100 dark:border-white/5 flex justify-between items-center transition-colors">
+            <span className="font-bold text-slate-900 dark:text-white">Total</span>
+            <div className="text-right">
+              {isSubscriber && hasFreeServices ? (
+                <>
+                  <p className="text-[10px] text-amber-600 font-bold uppercase tracking-widest mb-1">Assinatura Ativa</p>
+                  <span className="text-xl font-black text-amber-600">
+                    {totalPrice === 0 ? 'Incluso na Assinatura' : `R$ ${totalPrice.toFixed(2)} (parcial)`}
+                  </span>
+                </>
+              ) : (
+                <span className="text-2xl font-black text-primary">R$ {totalPrice.toFixed(2)}</span>
+              )}
+            </div>
           </div>
         </section>
       </main>
@@ -2298,6 +2520,7 @@ const AdminDashboard: React.FC<{
   const availableDays = useMemo(() => getNextDays(7), []);
   const [selectedDateStr, setSelectedDateStr] = useState(availableDays[0].dateStr); // Default to local today string
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
+  const [confirmCancelId, setConfirmCancelId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'LIST' | 'CALENDAR'>('LIST');
   const dateInputRef = useRef<HTMLInputElement>(null);
 
@@ -2693,10 +2916,39 @@ const AdminDashboard: React.FC<{
                           <span className="material-symbols-outlined text-gray-600 text-2xl">person</span>
                         </div>
                         <div className="flex-1 min-w-0">
-                          <h4 className="font-bold text-base text-slate-900 dark:text-white truncate">{app.customerName}</h4>
-                          <p className="text-xs text-gray-500 font-medium truncate opacity-80">
-                            {app.services.map(s => s.name).join(' + ')}
-                          </p>
+                          <div className="flex items-center gap-2">
+                            <h4 className="font-bold text-base text-slate-900 dark:text-white truncate">{app.customerName}</h4>
+                            {app.clientSubscription?.isActive && (
+                              <div className="flex items-center gap-1 bg-amber-500/10 text-amber-600 dark:text-amber-500 px-2 py-0.5 rounded-full border border-amber-500/20">
+                                <span className="material-symbols-outlined text-xs filled">crown</span>
+                                <span className="text-[10px] font-bold uppercase truncate max-w-[80px]">{app.clientSubscription.planName}</span>
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <p className="text-xs text-gray-500 font-medium truncate opacity-80">
+                              {app.services.map(s => s.name).join(' + ')}
+                            </p>
+                            {app.clientSubscription?.isActive && (() => {
+                              const limits = app.clientSubscription.serviceLimits || {};
+                              const usage = app.clientSubscription.serviceUsage || {};
+                              // Find remaining for the booked services
+                              const remainingList = app.services
+                                .map(s => {
+                                  const limit = limits[s.id];
+                                  if (limit === undefined || limit === 0) return null;
+                                  return Math.max(0, limit - (usage[s.id] || 0));
+                                })
+                                .filter(v => v !== null) as number[];
+                              if (remainingList.length === 0) return null;
+                              const minRemaining = Math.min(...remainingList);
+                              return (
+                                <span className="text-[10px] bg-slate-100 dark:bg-white/5 px-1.5 py-0.5 rounded text-gray-500 dark:text-gray-400 font-bold">
+                                  {minRemaining} {minRemaining === 1 ? 'corte restante' : 'cortes restantes'}
+                                </span>
+                              );
+                            })()}
+                          </div>
                         </div>
 
                         {/* <div className="relative">
@@ -2752,12 +3004,26 @@ Dúvidas, responder a essa mensagem!`)}`}
                         </button>
                         <button
                           onClick={() => {
-                            if (window.confirm('Tem certeza que deseja cancelar?')) handleUpdateStatus(app.id, 'CANCELLED');
+                            if (confirmCancelId === app.id) {
+                              // Second click: actually delete
+                              supabase.from('appointments').delete().eq('id', app.id)
+                                .then(({ error }) => {
+                                  if (error) alert('Erro ao cancelar');
+                                  else onRefresh();
+                                });
+                              setAppointments(prev => prev.filter(a => a.id !== app.id));
+                              setConfirmCancelId(null);
+                            } else {
+                              setConfirmCancelId(app.id);
+                            }
                           }}
-                          className="size-10 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-500 flex items-center justify-center transition-colors border border-red-500/20"
-                          title="Cancelar Agendamento"
+                          className={`size-10 rounded-xl flex items-center justify-center transition-colors border ${confirmCancelId === app.id
+                            ? 'bg-red-500 border-red-500 text-white animate-pulse'
+                            : 'bg-red-500/10 hover:bg-red-500/20 text-red-500 border-red-500/20'
+                            }`}
+                          title={confirmCancelId === app.id ? 'Confirmar cancelamento' : 'Cancelar Agendamento'}
                         >
-                          <span className="material-symbols-outlined text-lg">close</span>
+                          <span className="material-symbols-outlined text-lg">{confirmCancelId === app.id ? 'warning' : 'close'}</span>
                         </button>
                       </div>
                     </div>
@@ -2987,6 +3253,96 @@ const SelectPlanScreen: React.FC<{
   const [plans, setPlans] = useState<SubscriptionPlan[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Subscription status lookup
+  const [phone, setPhone] = useState('');
+  const [lookupLoading, setLookupLoading] = useState(false);
+  const [subStatus, setSubStatus] = useState<{
+    planName: string;
+    serviceLimits: Record<string, number>;
+    serviceUsage: Record<string, number>;
+    serviceNames: Record<string, string>;
+  } | null>(null);
+  const [notFound, setNotFound] = useState(false);
+  const [pendingAppointments, setPendingAppointments] = useState<any[]>([]);
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
+
+  const formatPhone = (v: string) => {
+    const n = v.replace(/\D/g, '').slice(0, 11);
+    if (n.length <= 2) return `(${n}`;
+    if (n.length <= 7) return `(${n.slice(0, 2)}) ${n.slice(2, 3)} ${n.slice(3)}`;
+    return `(${n.slice(0, 2)}) ${n.slice(2, 3)} ${n.slice(3, 7)}-${n.slice(7)}`;
+  };
+
+  const handleLookup = async () => {
+    const digits = phone.replace(/\D/g, '');
+    if (digits.length < 10) return;
+    setLookupLoading(true);
+    setSubStatus(null);
+    setNotFound(false);
+
+    const { data: client } = await supabase.from('clients').select('id').eq('phone', digits).single();
+    if (!client) { setNotFound(true); setLookupLoading(false); return; }
+
+    const { data: subs } = await supabase.from('user_subscriptions')
+      .select('*, subscription_plans(*)')
+      .eq('client_id', client.id);
+
+    const activeSub = subs?.find((s: any) => s.status === 'APPROVED');
+    if (!activeSub) { setNotFound(true); setLookupLoading(false); return; }
+
+    const plan = activeSub.subscription_plans;
+    const { data: ps } = await supabase.from('plan_services').select('service_id, monthly_limit').eq('plan_id', plan.id);
+    const { data: svcs } = await supabase.from('services').select('id, name');
+    const serviceNames: Record<string, string> = {};
+    svcs?.forEach((s: any) => { serviceNames[String(s.id)] = s.name; });
+
+    const limits: Record<string, number> = {};
+    ps?.forEach((p: any) => { limits[String(p.service_id)] = p.monthly_limit; });
+
+    // Compute usage from completed appointments this month
+    const startOfMonth = format(new Date(), 'yyyy-MM-01');
+    const { data: monthApps } = await supabase.from('appointments')
+      .select('services:appointment_services(service:services(id))')
+      .eq('client_id', client.id)
+      .gte('appointment_date', startOfMonth)
+      .eq('status', 'COMPLETED');
+
+    const { data: scData } = await supabase.from('service_components').select('*');
+    const componentsMap: Record<string, string[]> = {};
+    scData?.forEach((item: any) => {
+      const pid = String(item.parent_service_id);
+      if (!componentsMap[pid]) componentsMap[pid] = [];
+      componentsMap[pid].push(String(item.component_service_id));
+    });
+
+    const usage: Record<string, number> = {};
+    monthApps?.forEach((app: any) => {
+      app.services?.forEach((sv: any) => {
+        const sId = String(sv.service?.id);
+        if (componentsMap[sId]) {
+          componentsMap[sId].forEach(c => { usage[c] = (usage[c] || 0) + 1; });
+        } else {
+          usage[sId] = (usage[sId] || 0) + 1;
+        }
+      });
+    });
+
+    // Fetch pending/confirmed appointments for this client
+    const today = format(new Date(), 'yyyy-MM-dd');
+    const { data: pendingApps } = await supabase
+      .from('appointments')
+      .select('id, appointment_date, appointment_time, status, services:appointment_services(service:services(name))')
+      .eq('client_id', client.id)
+      .gte('appointment_date', today)
+      .in('status', ['PENDING', 'CONFIRMED'])
+      .order('appointment_date', { ascending: true })
+      .order('appointment_time', { ascending: true });
+
+    setPendingAppointments(pendingApps || []);
+    setSubStatus({ planName: plan.name, serviceLimits: limits, serviceUsage: usage, serviceNames });
+    setLookupLoading(false);
+  };
+
   useEffect(() => {
     supabase.from('subscription_plans')
       .select('*')
@@ -3011,8 +3367,116 @@ const SelectPlanScreen: React.FC<{
         <div className="text-center space-y-2">
           <h1 className="text-3xl font-black text-slate-900 dark:text-white uppercase">RS BARBEARIA</h1>
           <div className="h-1 w-20 bg-amber-500 mx-auto rounded-full"></div>
-          <p className="text-sm text-gray-500 dark:text-gray-400 font-bold uppercase tracking-widest mt-4">Escolha o seu plano</p>
+          <p className="text-sm text-gray-500 dark:text-gray-400 font-bold uppercase tracking-widest mt-4">Clube de Assinatura</p>
         </div>
+
+        {/* Phone Lookup - Subscriber Status */}
+        <div className="bg-zinc-900 dark:bg-black p-5 rounded-2xl border border-white/10 shadow-xl space-y-4">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="material-symbols-outlined text-amber-500 filled">crown</span>
+            <h3 className="text-white font-bold text-sm uppercase tracking-widest">Consultar Meu Plano</h3>
+          </div>
+          <div className="flex gap-2">
+            <input
+              type="tel"
+              placeholder="(00) 0 0000-0000"
+              value={phone}
+              onChange={(e) => setPhone(formatPhone(e.target.value))}
+              onKeyDown={(e) => e.key === 'Enter' && handleLookup()}
+              className="flex-1 bg-white/10 border border-white/10 text-white placeholder:text-gray-500 rounded-xl px-4 py-2.5 text-sm font-bold focus:outline-none focus:border-amber-500/50"
+            />
+            <button
+              onClick={handleLookup}
+              disabled={lookupLoading || phone.replace(/\D/g, '').length < 10}
+              className="bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-black font-black px-4 py-2.5 rounded-xl text-sm uppercase tracking-widest transition-all active:scale-95"
+            >
+              {lookupLoading ? '...' : 'Consultar'}
+            </button>
+          </div>
+
+          {notFound && (
+            <div className="flex items-center gap-2 text-red-400 text-xs font-bold">
+              <span className="material-symbols-outlined text-sm">error</span>
+              Nenhuma assinatura ativa encontrada para este número.
+            </div>
+          )}
+
+          {subStatus && (
+            <div className="border-t border-white/10 pt-4 space-y-3 animate-fade-in">
+              <div className="flex items-center justify-between">
+                <span className="text-amber-500 font-black text-sm uppercase tracking-widest">{subStatus.planName}</span>
+                <span className="text-[10px] text-green-400 bg-green-400/10 border border-green-400/20 px-2 py-0.5 rounded-full font-bold uppercase">Ativo</span>
+              </div>
+              <div className="space-y-2">
+                {Object.entries(subStatus.serviceLimits).map(([sId, limitVal]) => {
+                  const limit = Number(limitVal);
+                  const used = subStatus.serviceUsage[sId] || 0;
+                  const remaining = Math.max(0, limit - used);
+                  const pct = limit > 0 ? (used / limit) * 100 : 0;
+                  return (
+                    <div key={sId} className="space-y-1">
+                      <div className="flex justify-between text-xs">
+                        <span className="text-gray-300 font-medium">{subStatus.serviceNames[sId] || sId}</span>
+                        <span className={`font-black ${remaining === 0 ? 'text-red-400' : 'text-amber-400'}`}>{remaining}/{limit} restante{remaining !== 1 ? 's' : ''}</span>
+                      </div>
+                      <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all ${pct >= 100 ? 'bg-red-500' : 'bg-amber-500'}`}
+                          style={{ width: `${Math.min(100, pct)}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          {/* Pending Appointments for Cancellation */}
+          {subStatus && (
+            <div className="border-t border-white/10 pt-4 space-y-3">
+              <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">Meus Agendamentos</p>
+              {pendingAppointments.length === 0 ? (
+                <p className="text-[10px] text-gray-600 font-medium text-center py-2">Nenhum agendamento futuro encontrado</p>
+              ) : pendingAppointments.map((app: any) => {
+                const [year, month, day] = app.appointment_date.split('-');
+                const dateLabel = `${day}/${month}/${year}`;
+                const timeLabel = app.appointment_time?.slice(0, 5) || '';
+                const svcNames = app.services?.map((sv: any) => sv.service?.name).filter(Boolean).join(' + ') || '—';
+                const isCancelling = cancellingId === app.id;
+                return (
+                  <div key={app.id} className="flex items-center justify-between gap-3 bg-white/5 rounded-xl p-3">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-white text-xs font-bold truncate">{svcNames}</p>
+                      <p className="text-gray-400 text-[10px] font-medium mt-0.5">{dateLabel} às {timeLabel}</p>
+                    </div>
+                    <button
+                      onClick={async () => {
+                        if (isCancelling) {
+                          const { error } = await supabase.from('appointments').delete().eq('id', app.id);
+                          if (!error) {
+                            setPendingAppointments((prev: any[]) => prev.filter((a: any) => a.id !== app.id));
+                          }
+                          setCancellingId(null);
+                        } else {
+                          setCancellingId(app.id);
+                        }
+                      }}
+                      className={`shrink-0 flex items-center gap-1 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase transition-all border ${isCancelling
+                        ? 'bg-red-500 border-red-500 text-white animate-pulse'
+                        : 'bg-red-500/10 border-red-500/20 text-red-400 hover:bg-red-500/20'
+                        }`}
+                    >
+                      <span className="material-symbols-outlined text-xs">{isCancelling ? 'warning' : 'close'}</span>
+                      {isCancelling ? 'Confirmar' : 'Cancelar'}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        <p className="text-sm text-gray-500 dark:text-gray-400 font-bold uppercase tracking-widest text-center">Escolha o seu plano</p>
 
         {loading ? (
           <div className="flex flex-col items-center justify-center py-20 gap-4">
@@ -3209,11 +3673,15 @@ const AdminSubscriptionsScreen: React.FC<{
 }> = ({ onBack }) => {
   const [subs, setSubs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selectedProof, setSelectedProof] = useState<string | null>(null);
+  const [confirmCancelSubId, setConfirmCancelSubId] = useState<number | null>(null);
+  const [availablePlans, setAvailablePlans] = useState<{ id: number; name: string }[]>([]);
+  const [changingPlanId, setChangingPlanId] = useState<number | null>(null);
 
   const fetchSubs = async () => {
     const { data } = await supabase
       .from('user_subscriptions')
-      .select('*, client:clients(name, phone), plan:subscription_plans(name)')
+      .select('*, client:clients(name, phone), plan:subscription_plans(id, name)')
       .order('created_at', { ascending: false });
     if (data) setSubs(data);
     setLoading(false);
@@ -3221,14 +3689,26 @@ const AdminSubscriptionsScreen: React.FC<{
 
   useEffect(() => {
     fetchSubs();
+    supabase.from('subscription_plans').select('id, name').eq('is_active', true).order('price', { ascending: true })
+      .then(({ data }) => { if (data) setAvailablePlans(data); });
   }, []);
 
-  const handleStatus = async (id: number, status: 'APPROVED' | 'REJECTED') => {
+  const handleStatus = async (id: number, status: 'APPROVED' | 'REJECTED' | 'CANCELLED') => {
     const { error } = await supabase
       .from('user_subscriptions')
       .update({ status, approved_at: status === 'APPROVED' ? new Date().toISOString() : null })
       .eq('id', id);
     if (!error) fetchSubs();
+  };
+
+  const handleChangePlan = async (subId: number, planId: number) => {
+    setChangingPlanId(subId);
+    const { error } = await supabase
+      .from('user_subscriptions')
+      .update({ plan_id: planId })
+      .eq('id', subId);
+    if (!error) fetchSubs();
+    setChangingPlanId(null);
   };
 
   return (
@@ -3256,19 +3736,44 @@ const AdminSubscriptionsScreen: React.FC<{
                     <span className="text-sm font-black text-slate-900 dark:text-white uppercase tracking-tight">{sub.client?.name}</span>
                     <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${sub.status === 'APPROVED' ? 'bg-green-100 text-green-700' :
                       sub.status === 'REJECTED' ? 'bg-red-100 text-red-700' :
-                        'bg-amber-100 text-amber-700'
+                        sub.status === 'CANCELLED' ? 'bg-slate-100 text-slate-600' :
+                          'bg-amber-100 text-amber-700'
                       }`}>
-                      {sub.status}
+                      {sub.status === 'APPROVED' ? 'APROVADO' :
+                        sub.status === 'CANCELLED' ? 'CANCELADO' :
+                          sub.status === 'REJECTED' ? 'REJEITADO' :
+                            'PENDENTE'}
                     </span>
                   </div>
-                  <p className="text-xs text-gray-500 font-medium">{sub.client?.phone} • Plano: <span className="text-primary font-bold">{sub.plan?.name}</span></p>
+                  <p className="text-xs text-gray-500 font-medium">{sub.client?.phone}</p>
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className="material-symbols-outlined text-xs text-gray-400">swap_horiz</span>
+                    <select
+                      value={sub.plan?.id ?? sub.plan_id}
+                      disabled={changingPlanId === sub.id}
+                      onChange={async (e) => {
+                        const newPlanId = Number(e.target.value);
+                        if (newPlanId !== (sub.plan?.id ?? sub.plan_id)) {
+                          await handleChangePlan(sub.id, newPlanId);
+                        }
+                      }}
+                      className="text-xs font-bold text-primary bg-transparent border-none outline-none cursor-pointer hover:text-primary/80 transition-colors disabled:opacity-50"
+                    >
+                      {availablePlans.map(p => (
+                        <option key={p.id} value={p.id}>{p.name}</option>
+                      ))}
+                    </select>
+                    {changingPlanId === sub.id && (
+                      <div className="size-3 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                    )}
+                  </div>
                   <p className="text-[10px] text-gray-400 font-bold">{new Date(sub.created_at).toLocaleString('pt-BR')}</p>
                 </div>
 
                 <div className="flex items-center gap-3">
                   {sub.payment_proof_url && (
                     <button
-                      onClick={() => window.open(sub.payment_proof_url, '_blank')}
+                      onClick={() => setSelectedProof(sub.payment_proof_url)}
                       className="flex items-center gap-2 px-3 py-2 bg-gray-100 dark:bg-white/5 rounded-xl text-[10px] font-bold text-gray-600 dark:text-gray-300 hover:bg-gray-200 transition-colors"
                     >
                       <span className="material-symbols-outlined text-sm">visibility</span>
@@ -3281,16 +3786,49 @@ const AdminSubscriptionsScreen: React.FC<{
                       <button
                         onClick={() => handleStatus(sub.id, 'APPROVED')}
                         className="size-10 bg-green-500 text-white rounded-xl flex items-center justify-center shadow-lg shadow-green-500/20 active:scale-95 transition-all"
+                        title="Aprovar"
                       >
                         <span className="material-symbols-outlined">check</span>
                       </button>
                       <button
                         onClick={() => handleStatus(sub.id, 'REJECTED')}
                         className="size-10 bg-red-500 text-white rounded-xl flex items-center justify-center shadow-lg shadow-red-500/20 active:scale-95 transition-all"
+                        title="Rejeitar"
                       >
                         <span className="material-symbols-outlined">close</span>
                       </button>
                     </div>
+                  )}
+
+                  {sub.status === 'APPROVED' && (
+                    <button
+                      onClick={() => {
+                        if (confirmCancelSubId === sub.id) {
+                          handleStatus(sub.id, 'CANCELLED');
+                          setConfirmCancelSubId(null);
+                        } else {
+                          setConfirmCancelSubId(sub.id);
+                        }
+                      }}
+                      className={`size-10 rounded-xl flex items-center justify-center transition-all active:scale-95 ${confirmCancelSubId === sub.id
+                        ? 'bg-red-500 text-white animate-pulse shadow-lg shadow-red-500/30'
+                        : 'bg-slate-200 dark:bg-white/10 text-slate-600 dark:text-gray-400 hover:bg-red-500 hover:text-white'
+                        }`}
+                      title={confirmCancelSubId === sub.id ? 'Confirmar cancelamento' : 'Cancelar Assinatura'}
+                    >
+                      <span className="material-symbols-outlined text-sm">{confirmCancelSubId === sub.id ? 'warning' : 'block'}</span>
+                    </button>
+                  )}
+
+                  {(sub.status === 'CANCELLED' || sub.status === 'REJECTED') && (
+                    <button
+                      onClick={() => handleStatus(sub.id, 'APPROVED')}
+                      className="flex items-center gap-1.5 px-3 h-10 bg-green-500/10 hover:bg-green-500 text-green-600 hover:text-white rounded-xl text-[10px] font-bold uppercase tracking-wider border border-green-500/20 transition-all active:scale-95"
+                      title="Reativar Assinatura"
+                    >
+                      <span className="material-symbols-outlined text-sm">bookmark_add</span>
+                      Reativar
+                    </button>
                   )}
                 </div>
               </div>
@@ -3298,6 +3836,44 @@ const AdminSubscriptionsScreen: React.FC<{
           </div>
         )}
       </main>
+
+      {/* Proof Modal */}
+      {selectedProof && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md animate-fade-in"
+          onClick={() => setSelectedProof(null)}
+        >
+          <div
+            className="relative max-w-2xl w-full bg-white dark:bg-surface-dark rounded-3xl overflow-hidden shadow-2xl animate-scale-up"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between p-4 border-b border-gray-100 dark:border-white/5">
+              <h3 className="font-bold text-slate-900 dark:text-white">Comprovante de Pagamento</h3>
+              <button
+                onClick={() => setSelectedProof(null)}
+                className="size-10 rounded-full flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/10 text-gray-400 transition-colors"
+              >
+                <span className="material-symbols-outlined">close</span>
+              </button>
+            </div>
+            <div className="p-4 flex items-center justify-center bg-gray-50 dark:bg-black/20 min-h-[300px] max-h-[70vh] overflow-auto">
+              <img
+                src={selectedProof}
+                alt="Comprovante"
+                className="max-w-full h-auto rounded-xl shadow-lg border border-gray-200 dark:border-white/5"
+              />
+            </div>
+            <div className="p-4 text-center">
+              <button
+                onClick={() => setSelectedProof(null)}
+                className="px-8 py-3 bg-slate-900 dark:bg-white text-white dark:text-black font-bold rounded-xl transition-all active:scale-95 text-xs uppercase"
+              >
+                Fechar Visualização
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -3306,25 +3882,63 @@ const AdminManagePlansScreen: React.FC<{
   onBack: () => void;
 }> = ({ onBack }) => {
   const [plans, setPlans] = useState<SubscriptionPlan[]>([]);
+  const [services, setServices] = useState<Service[]>([]);
   const [loading, setLoading] = useState(true);
+  // Local controlled state for Qtd inputs: planId -> serviceId -> limit value
+  const [localLimits, setLocalLimits] = useState<Record<string, Record<string, number>>>({});
+
+  // Sync localLimits whenever plans data is refreshed from DB
+  useEffect(() => {
+    const next: Record<string, Record<string, number>> = {};
+    plans.forEach(p => {
+      next[p.id] = { ...(p.service_limits || {}) };
+    });
+    setLocalLimits(next);
+  }, [plans]);
+
+  const fetchServices = async () => {
+    const { data } = await supabase.from('services').select('*').eq('is_active', true).order('display_order', { ascending: true });
+    if (data) setServices(data.map((s: any) => ({ ...s, id: String(s.id), imageUrl: s.image_url })));
+  };
 
   const fetchPlans = async () => {
     const { data } = await supabase.from('subscription_plans').select('*').order('price', { ascending: true });
-    if (data) setPlans(data);
+    if (data) {
+      const withServices = await Promise.all(
+        data.map(async (p: any) => {
+          const { data: ps } = await supabase.from('plan_services').select('service_id, monthly_limit').eq('plan_id', p.id);
+          const serviceLimits: Record<string, number> = {};
+          ps?.forEach(s => {
+            serviceLimits[String(s.service_id)] = s.monthly_limit;
+          });
+          return {
+            ...p,
+            allowed_services: ps?.map(s => String(s.service_id)) || [],
+            service_limits: serviceLimits
+          };
+        })
+      );
+      setPlans(withServices);
+    }
     setLoading(false);
   };
 
   useEffect(() => {
     fetchPlans();
+    fetchServices();
   }, []);
 
-  const handleUpdate = async (id: string, price: number, qr_code_url: string, pix_code: string) => {
-    // Basic check to avoid redundant updates if invoked with same values
+  const handleUpdate = async (id: string, price: number, qr_code_url: string, pix_code: string, service_limits: Record<string, number>) => {
     const current = plans.find(p => p.id === id);
+    const servicesList = Object.keys(service_limits).sort();
+    const currentServicesList = (current?.allowed_services || []).sort();
+
     if (current &&
       Number(current.price) === price &&
       current.qr_code_url === qr_code_url &&
-      current.pix_code === pix_code) {
+      current.pix_code === pix_code &&
+      JSON.stringify(currentServicesList) === JSON.stringify(servicesList) &&
+      JSON.stringify(current.service_limits) === JSON.stringify(service_limits)) {
       return;
     }
 
@@ -3332,7 +3946,19 @@ const AdminManagePlansScreen: React.FC<{
       .from('subscription_plans')
       .update({ price, qr_code_url, pix_code })
       .eq('id', id);
+
     if (!error) {
+      // Update services mapping with limits
+      await supabase.from('plan_services').delete().eq('plan_id', id);
+      if (servicesList.length > 0) {
+        await supabase.from('plan_services').insert(
+          servicesList.map(sId => ({
+            plan_id: parseInt(id),
+            service_id: parseInt(sId),
+            monthly_limit: service_limits[sId] || 0
+          }))
+        );
+      }
       fetchPlans();
     } else {
       alert('Erro ao atualizar: ' + error.message);
@@ -3350,60 +3976,122 @@ const AdminManagePlansScreen: React.FC<{
 
       <main className="p-4 space-y-6 max-w-2xl mx-auto w-full">
         {plans.map(plan => (
-          <div key={plan.id} className="bg-white dark:bg-surface-dark p-6 rounded-3xl border border-gray-200 dark:border-white/5 shadow-sm space-y-4">
+          <div key={`${plan.id}-${JSON.stringify(plan.service_limits)}`} className="bg-white dark:bg-surface-dark p-6 rounded-3xl border border-gray-200 dark:border-white/5 shadow-sm space-y-4">
             <div className="flex items-center gap-2 border-b border-gray-100 dark:border-white/5 pb-3">
               <span className="material-symbols-outlined text-amber-500">card_membership</span>
               <h3 className="font-black text-slate-900 dark:text-white uppercase tracking-tight">{plan.name}</h3>
             </div>
 
-            <div className="grid md:grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Valor Mensal (R$)</label>
-                <input
-                  type="number"
-                  className="w-full bg-gray-50 dark:bg-black/20 p-3 rounded-xl border border-gray-200 dark:border-white/10 text-sm font-bold"
-                  defaultValue={plan.price}
-                  onBlur={(e) => handleUpdate(plan.id, Number(e.target.value), plan.qr_code_url || '', plan.pix_code || '')}
-                />
+            <div className="grid md:grid-cols-2 gap-6">
+              <div className="space-y-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Valor Mensal (R$)</label>
+                  <input
+                    type="number"
+                    className="w-full bg-gray-50 dark:bg-black/20 p-3 rounded-xl border border-gray-200 dark:border-white/10 text-sm font-bold"
+                    defaultValue={plan.price}
+                    onBlur={(e) => handleUpdate(plan.id, Number(e.target.value), plan.qr_code_url || '', plan.pix_code || '', plan.service_limits || {})}
+                  />
+                </div>
+
+                {/* Removed monthly_limit input as it is now per-service */}
+
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Serviços Inclusos</label>
+                  <div className="grid grid-cols-1 gap-2 border border-gray-100 dark:border-white/5 p-3 rounded-2xl bg-gray-50/50 dark:bg-black/10">
+                    {services.map(s => {
+                      const isChecked = plan.allowed_services?.includes(s.id);
+                      const currentLimit = plan.service_limits?.[s.id] || 0;
+                      return (
+                        <div key={s.id} className="flex items-center justify-between gap-2 group">
+                          <label className="flex items-center gap-2 cursor-pointer flex-1">
+                            <input
+                              type="checkbox"
+                              className="accent-amber-500"
+                              checked={isChecked}
+                              onChange={(e) => {
+                                const newLimits = { ...(plan.service_limits || {}) };
+                                if (e.target.checked) {
+                                  newLimits[s.id] = currentLimit || 1;
+                                } else {
+                                  delete newLimits[s.id];
+                                }
+                                handleUpdate(plan.id, plan.price, plan.qr_code_url || '', plan.pix_code || '', newLimits);
+                              }}
+                            />
+                            <span className="text-xs font-medium text-slate-600 dark:text-gray-400 group-hover:text-amber-500 transition-colors">{s.name}</span>
+                          </label>
+                          {isChecked && (
+                            <div className="flex items-center gap-1 bg-white dark:bg-black/40 rounded-lg px-2 py-1 border border-gray-100 dark:border-white/5">
+                              <span className="text-[9px] font-bold text-gray-400 uppercase">Qtd:</span>
+                              <input
+                                type="number"
+                                min="0"
+                                className="w-16 bg-transparent text-xs font-black text-amber-600 focus:outline-none text-center"
+                                value={localLimits[plan.id]?.[s.id] ?? currentLimit}
+                                onChange={(e) => {
+                                  const val = parseInt(e.target.value) || 0;
+                                  setLocalLimits(prev => ({
+                                    ...prev,
+                                    [plan.id]: { ...(prev[plan.id] || {}), [s.id]: val }
+                                  }));
+                                }}
+                                onBlur={(e) => {
+                                  const val = parseInt(e.target.value) || 0;
+                                  const newLimits = { ...(plan.service_limits || {}), [s.id]: val };
+                                  handleUpdate(plan.id, plan.price, plan.qr_code_url || '', plan.pix_code || '', newLimits);
+                                }}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
-              <div className="space-y-1">
-                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Código Pix (Copia e Cola)</label>
-                <textarea
-                  className="w-full bg-gray-50 dark:bg-black/20 p-3 rounded-xl border border-gray-200 dark:border-white/10 text-xs font-mono"
-                  rows={2}
-                  defaultValue={plan.pix_code}
-                  onBlur={(e) => handleUpdate(plan.id, plan.price, plan.qr_code_url || '', e.target.value)}
-                  placeholder="Cole aqui o código Pix Copia e Cola..."
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">QR Code (PIX)</label>
-                <div className="flex items-center gap-4">
-                  {plan.qr_code_url ? (
-                    <img src={plan.qr_code_url} className="size-12 rounded-lg object-cover border border-gray-200 dark:border-white/10" alt="QR Preview" />
-                  ) : (
-                    <div className="size-12 rounded-lg bg-gray-100 dark:bg-black/20 flex items-center justify-center border border-gray-200 dark:border-white/10">
-                      <span className="material-symbols-outlined text-gray-400">qr_code_2</span>
-                    </div>
-                  )}
-                  <div className="relative flex-1">
-                    <input
-                      type="file"
-                      accept="image/*"
-                      className="absolute inset-0 opacity-0 cursor-pointer z-10"
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (file) {
-                          const reader = new FileReader();
-                          reader.onloadend = () => {
-                            handleUpdate(plan.id, plan.price, reader.result as string, plan.pix_code || '');
-                          };
-                          reader.readAsDataURL(file);
-                        }
-                      }}
-                    />
-                    <div className="w-full bg-gray-100 dark:bg-black/20 p-3 rounded-xl border border-dashed border-gray-300 dark:border-white/10 text-xs font-bold text-gray-500 text-center hover:border-amber-500/50 transition-colors">
-                      CLIQUE PARA ENVIAR IMAGEM
+
+              <div className="space-y-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Código Pix (Copia e Cola)</label>
+                  <textarea
+                    className="w-full bg-gray-50 dark:bg-black/20 p-3 rounded-xl border border-gray-200 dark:border-white/10 text-xs font-mono"
+                    rows={3}
+                    defaultValue={plan.pix_code}
+                    onBlur={(e) => handleUpdate(plan.id, plan.price, plan.qr_code_url || '', e.target.value, plan.service_limits || {})}
+                    placeholder="Cole aqui o código Pix Copia e Cola..."
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">QR Code (PIX)</label>
+                  <div className="flex items-center gap-4 bg-gray-50 dark:bg-black/20 p-3 rounded-xl border border-gray-200 dark:border-white/10">
+                    {plan.qr_code_url ? (
+                      <img src={plan.qr_code_url} className="size-16 rounded-lg object-cover border border-gray-200 dark:border-white/10 bg-white" alt="QR Preview" />
+                    ) : (
+                      <div className="size-16 rounded-lg bg-white dark:bg-black/20 flex items-center justify-center border border-gray-200 dark:border-white/10">
+                        <span className="material-symbols-outlined text-gray-400">qr_code_2</span>
+                      </div>
+                    )}
+                    <div className="relative flex-1">
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="absolute inset-0 opacity-0 cursor-pointer z-10"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            const reader = new FileReader();
+                            reader.onloadend = () => {
+                              handleUpdate(plan.id, plan.price, reader.result as string, plan.pix_code || '', plan.service_limits || {});
+                            };
+                            reader.readAsDataURL(file);
+                          }
+                        }}
+                      />
+                      <div className="w-full bg-white dark:bg-black/40 p-3 rounded-lg border border-dashed border-gray-300 dark:border-white/10 text-[10px] font-black text-gray-400 text-center hover:border-amber-500/50 transition-colors uppercase tracking-widest">
+                        ADICIONAR QR CODE
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -3591,7 +4279,15 @@ const App: React.FC = () => {
                   services:appointment_services(
                   service:services(*)
                   ),
-                  clients(name, phone)
+                  clients(
+                    id,
+                    name, 
+                    phone,
+                    user_subscriptions(
+                      *,
+                      subscription_plans(*)
+                    )
+                  )
                   `)
       .order('appointment_date', { ascending: true })
       .order('appointment_time', { ascending: true });
@@ -3616,19 +4312,98 @@ const App: React.FC = () => {
       if (dataString === lastAppointmentsDataStringRef.current) return;
       lastAppointmentsDataStringRef.current = dataString;
 
-      let newApps = data.map((a: any) => ({
-        id: String(a.id),
-        date: a.appointment_date,
-        time: a.appointment_time ? a.appointment_time.slice(0, 5) : '',
-        status: a.status,
-        totalPrice: a.total_price,
-        customerName: a.clients?.name || 'Cliente',
-        customerPhone: a.clients?.phone || '',
-        services: a.services.map((s: any) => ({
-          ...s.service,
-          imageUrl: s.service.image_url
-        }))
-      }));
+      // Fetch plan_services limits for ALL unique plan ids in this batch
+      const planIds = [...new Set(data
+        .map((a: any) => a.clients?.user_subscriptions?.find((s: any) => s.status === 'APPROVED')?.subscription_plans?.id)
+        .filter(Boolean)
+      )];
+
+      // Map planId -> { serviceId -> monthly_limit }
+      const planServiceLimits: Record<string, Record<string, number>> = {};
+      if (planIds.length > 0) {
+        const { data: psData } = await supabase
+          .from('plan_services')
+          .select('plan_id, service_id, monthly_limit')
+          .in('plan_id', planIds);
+        psData?.forEach((ps: any) => {
+          const pid = String(ps.plan_id);
+          if (!planServiceLimits[pid]) planServiceLimits[pid] = {};
+          planServiceLimits[pid][String(ps.service_id)] = ps.monthly_limit;
+        });
+      }
+
+      // Fetch service_components to unpack combos when calculating usage
+      const { data: scData } = await supabase.from('service_components').select('*');
+      const componentsMap: Record<string, string[]> = {};
+      scData?.forEach((item: any) => {
+        const pid = String(item.parent_service_id);
+        if (!componentsMap[pid]) componentsMap[pid] = [];
+        componentsMap[pid].push(String(item.component_service_id));
+      });
+
+      // Fetch COMPLETED appointments this month with services, to compute per-service usage per client
+      const startOfMonth = format(new Date(), 'yyyy-MM-01');
+      const { data: monthApps } = await supabase
+        .from('appointments')
+        .select('client_id, services:appointment_services(service:services(id))')
+        .gte('appointment_date', startOfMonth)
+        .eq('status', 'COMPLETED');
+
+      // Build usage map: clientId -> serviceId -> count
+      const clientUsage: Record<string, Record<string, number>> = {};
+      monthApps?.forEach((app: any) => {
+        const cid = String(app.client_id);
+        if (!clientUsage[cid]) clientUsage[cid] = {};
+        app.services?.forEach((sv: any) => {
+          const sId = String(sv.service?.id);
+          if (componentsMap[sId]) {
+            componentsMap[sId].forEach(compId => {
+              clientUsage[cid][compId] = (clientUsage[cid][compId] || 0) + 1;
+            });
+          } else {
+            clientUsage[cid][sId] = (clientUsage[cid][sId] || 0) + 1;
+          }
+        });
+      });
+
+      let newApps = data.map((a: any) => {
+        const client = a.clients;
+        const activeSub = client?.user_subscriptions?.find((s: any) => s.status === 'APPROVED');
+
+        let clientSubscription;
+        if (activeSub) {
+          const plan = activeSub.subscription_plans;
+          const planId = String(plan.id);
+          const serviceLimits = planServiceLimits[planId] || {};
+          const serviceUsage = clientUsage[String(client.id)] || {};
+          const allowedServices = Object.keys(serviceLimits);
+
+          clientSubscription = {
+            planName: plan.name,
+            cutsUsed: 0,
+            cutsLimit: 0,
+            serviceLimits,
+            serviceUsage,
+            allowedServices,
+            isActive: true
+          };
+        }
+
+        return {
+          id: String(a.id),
+          date: a.appointment_date,
+          time: a.appointment_time ? a.appointment_time.slice(0, 5) : '',
+          status: a.status,
+          totalPrice: a.total_price,
+          customerName: client?.name || 'Cliente',
+          customerPhone: client?.phone || '',
+          services: a.services.map((s: any) => ({
+            ...s.service,
+            imageUrl: s.service.image_url
+          })),
+          clientSubscription
+        };
+      });
 
       if (currentUserRole === 'CUSTOMER' && booking.customerPhone) {
         newApps = newApps.filter((app: Appointment) => app.customerPhone === booking.customerPhone);
@@ -3718,13 +4493,22 @@ const App: React.FC = () => {
   const handleFinishBooking = async () => {
     // 1. Find or Create Client
     let clientId: number | undefined;
-    const { data: clientData } = await supabase.from('clients').select('id').eq('phone', booking.customerPhone).single();
+    const phoneDigits = booking.customerPhone.replace(/\D/g, '');
+    const { data: clientData } = await supabase.from('clients').select('id').eq('phone', phoneDigits).single();
     if (clientData) {
       clientId = clientData.id;
     } else {
-      const { data: newClient, error: clientError } = await supabase.from('clients').insert({ name: booking.customerName, phone: booking.customerPhone }).select().single();
-      if (clientError || !newClient) { alert('Erro ao salvar cliente'); return; }
-      clientId = newClient.id;
+      // Fallback for existing clients with formatting
+      const { data: allClients } = await supabase.from('clients').select('id, phone');
+      const existing = allClients?.find(c => c.phone.replace(/\D/g, '') === phoneDigits);
+
+      if (existing) {
+        clientId = existing.id;
+      } else {
+        const { data: newClient, error: clientError } = await supabase.from('clients').insert({ name: booking.customerName, phone: phoneDigits }).select().single();
+        if (clientError || !newClient) { alert('Erro ao salvar cliente'); return; }
+        clientId = newClient.id;
+      }
     }
 
     // 1.5 Check Availability
@@ -3747,12 +4531,31 @@ const App: React.FC = () => {
       return;
     }
 
-    // 2. Create Appointment
+    // Calculate final price based on per-service limits
+    const isSubscriber = booking.clientSubscription?.isActive;
+    const serviceLimits = booking.clientSubscription?.serviceLimits || {};
+    const serviceUsage = booking.clientSubscription?.serviceUsage || {};
+    const runningUsage = { ...serviceUsage };
+
+    const finalPrice = booking.selectedServices.reduce((sum, s) => {
+      if (isSubscriber) {
+        const limit = serviceLimits[s.id];
+        if (limit !== undefined && limit > 0) {
+          const used = runningUsage[s.id] || 0;
+          if (used < limit) {
+            runningUsage[s.id] = used + 1;
+            return sum; // free
+          }
+        }
+      }
+      return sum + s.price;
+    }, 0);
+
     const { data: appData, error: appError } = await supabase.from('appointments').insert({
       client_id: clientId,
       appointment_date: booking.selectedDate,
       appointment_time: booking.selectedTime,
-      total_price: booking.selectedServices.reduce((sum, s) => sum + s.price, 0),
+      total_price: finalPrice,
       status: 'PENDING'
     }).select().single();
 

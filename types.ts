@@ -29,6 +29,10 @@ export interface SubscriptionPlan {
   qr_code_url?: string;
   pix_code?: string;
   is_active: boolean;
+  monthly_limit: number; // Legacy global limit
+  allowed_services?: string[]; // Legacy list
+  service_limits?: Record<string, number>; // serviceId -> monthlyLimit
+  service_components?: Record<string, string[]>; // comboId -> basicServiceIds
   created_at: string;
 }
 
@@ -36,7 +40,7 @@ export interface UserSubscription {
   id: string;
   client_id: number;
   plan_id: number;
-  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
   payment_proof_url?: string;
   created_at: string;
   approved_at?: string;
@@ -68,6 +72,12 @@ export interface Appointment {
   time: string; // HH:mm
   totalPrice: number;
   status: 'PENDING' | 'CONFIRMED' | 'COMPLETED' | 'CANCELLED';
+  clientSubscription?: {
+    planName: string;
+    cutsUsed: number;
+    cutsLimit: number;
+    isActive: boolean;
+  };
 }
 
 export interface BookingState {
@@ -77,6 +87,12 @@ export interface BookingState {
   selectedDate: string;
   selectedTime: string;
   selectedPlan?: SubscriptionPlan;
+  clientSubscription?: {
+    planName: string;
+    cutsUsed: number;
+    cutsLimit: number;
+    isActive: boolean;
+  };
 }
 
 export interface ChatMessage {
