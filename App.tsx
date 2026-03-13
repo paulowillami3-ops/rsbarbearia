@@ -100,23 +100,47 @@ const AdminClientsScreen: React.FC<{ onBack: () => void; onChat: (id: string, na
     }
   };
 
-  const handleUpdate = () => {
+  const handleUpdate = async () => {
     if (!editingClient) return;
-    supabase.from('clients').update({
+    const normalizedPhone = editingClient.phone.replace(/\D/g, '');
+
+    // Check for duplicate phone
+    const { data: duplicateClient, error: checkError } = await supabase
+      .from('clients')
+      .select('id')
+      .eq('phone', normalizedPhone)
+      .neq('id', editingClient.id)
+      .maybeSingle();
+
+    if (checkError) {
+      console.error('Error checking for duplicate client:', checkError);
+    }
+
+    if (duplicateClient) {
+      alert('Este telefone já está cadastrado para outro cliente.');
+      return;
+    }
+
+    const { error } = await supabase.from('clients').update({
       name: editingClient.name,
-      phone: editingClient.phone
+      phone: normalizedPhone
     })
-      .eq('id', editingClient.id)
-      .then(({ error }) => {
-        if (error) alert('Erro ao atualizar: ' + error.message);
-        else {
-          setEditingClient(null);
-          fetchClients();
-        }
-      });
+      .eq('id', editingClient.id);
+
+    if (error) alert('Erro ao atualizar: ' + error.message);
+    else {
+      setEditingClient(null);
+      fetchClients();
+    }
   };
 
-  const filtered = clients.filter(c => c.name.toLowerCase().includes(search.toLowerCase()) || c.phone.includes(search));
+  const filtered = clients.filter(c => {
+    const searchLower = search.toLowerCase();
+    const nameMatch = c.name.toLowerCase().includes(searchLower);
+    const searchDigits = search.replace(/\D/g, '');
+    const phoneMatch = searchDigits ? c.phone.includes(searchDigits) : false;
+    return nameMatch || phoneMatch;
+  });
 
   return (
     <div className="bg-gradient-to-b from-primary/20 to-white dark:bg-background-dark min-h-screen flex flex-col transition-colors relative">
@@ -4465,15 +4489,17 @@ const App: React.FC = () => {
 
     let cId = selectedChatClient?.id;
 
+    const normalizedPhone = phoneToSend.replace(/\D/g, '');
+
     // Resolve Client ID
     if (!cId) {
       // Look up by phone
-      const { data: client } = await supabase.from('clients').select('id').eq('phone', phoneToSend).single();
+      const { data: client } = await supabase.from('clients').select('id').eq('phone', normalizedPhone).single();
       if (client) {
         cId = client.id;
       } else {
         // Create
-        const { data: newClient } = await supabase.from('clients').insert({ name: nameToSend, phone: phoneToSend }).select().single();
+        const { data: newClient } = await supabase.from('clients').insert({ name: nameToSend, phone: normalizedPhone }).select().single();
         if (newClient) cId = newClient.id;
       }
     }
@@ -4722,12 +4748,13 @@ const App: React.FC = () => {
           onSubmit={async (proof, phone, name) => {
             // Register/Find Client
             let cId;
-            const { data: client } = await supabase.from('clients').select('id').eq('phone', phone).single();
+            const normalizedPhone = phone.replace(/\D/g, '');
+            const { data: client } = await supabase.from('clients').select('id').eq('phone', normalizedPhone).single();
             if (client) {
               cId = client.id;
               await supabase.from('clients').update({ name }).eq('id', cId);
             } else {
-              const { data: newClient } = await supabase.from('clients').insert({ name, phone }).select().single();
+              const { data: newClient } = await supabase.from('clients').insert({ name, phone: normalizedPhone }).select().single();
               if (newClient) cId = newClient.id;
             }
 
