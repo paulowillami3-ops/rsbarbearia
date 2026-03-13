@@ -524,10 +524,10 @@ const SelectServicesScreen: React.FC<{
                     const startOfMonth = format(new Date(), 'yyyy-MM-01');
                     const { data: monthApps } = await supabase
                       .from('appointments')
-                      .select('id, services')
+                      .select('id, services:appointment_services(service_id)')
                       .eq('client_id', client.id)
                       .gte('appointment_date', startOfMonth)
-                      .eq('status', 'COMPLETED');
+                      .in('status', ['COMPLETED', 'PENDING']);
 
                     // 3. Fetch Service Component mapping to "unpack" combos
                     const { data: sc } = await supabase.from('service_components').select('*');
@@ -542,15 +542,15 @@ const SelectServicesScreen: React.FC<{
                     monthApps?.forEach(app => {
                       const appServices = app.services || [];
                       appServices.forEach((s: any) => {
-                        const sId = String(s.id);
+                        const sId = String(s.service_id);
+                        // Increment specific service usage
+                        usage[sId] = (usage[sId] || 0) + 1;
+
                         if (componentsMap[sId]) {
-                          // It is a combo, increment components
+                          // It is a combo, increment components too
                           componentsMap[sId].forEach(compId => {
                             usage[compId] = (usage[compId] || 0) + 1;
                           });
-                        } else {
-                          // Individual service
-                          usage[sId] = (usage[sId] || 0) + 1;
                         }
                       });
                     });
@@ -599,67 +599,76 @@ const SelectServicesScreen: React.FC<{
           />
         </div>
         <div className="space-y-4">
-          {services.map(service => (
-            <label key={service.id} className={`relative flex gap-4 p-4 rounded-xl bg-white dark:bg-surface-dark border transition-all cursor-pointer ${booking.selectedServices.some(s => s.id === service.id) ? 'border-primary' : 'border-gray-200 dark:border-transparent'} shadow-sm hover:shadow-md`}>
-              <div className="size-20 rounded-lg overflow-hidden bg-gray-200 dark:bg-gray-800 shrink-0">
-                <img
-                  src={service.imageUrl}
-                  onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.parentElement?.classList.add('flex', 'items-center', 'justify-center'); e.currentTarget.parentElement!.innerHTML = '<span class="material-symbols-outlined text-gray-400">image_not_supported</span>'; }}
-                  className="w-full h-full object-cover"
-                  alt={service.name}
-                />
-              </div>
-              <div className="flex-1">
-                <h3 className="text-base font-bold text-slate-900 dark:text-white">{service.name}</h3>
-                <p className="text-gray-500 dark:text-gray-400 text-xs line-clamp-2 mt-1">{service.description}</p>
-                <div className="flex justify-between mt-2">
-                  <span className="text-primary font-bold text-sm">
-                    {(() => {
-                      const isSub = booking.clientSubscription?.isActive;
-                      const isAllowed = booking.clientSubscription?.allowedServices?.includes(service.id);
-
-                      if (isSub && isAllowed) {
-                        return (
-                          <span className="text-amber-600 dark:text-amber-500 flex items-center gap-1">
-                            <span className="material-symbols-outlined text-sm filled">check_circle</span>
-                            {(() => {
-                              const isSelected = booking.selectedServices.some(s => s.id === service.id);
-
-                              // Check if it's a combo or individual
-                              // For simplicity in the UI counter, we show the status of the service itself IF it has a direct limit
-                              // OR if it's a combo, we could show something more complex, but let's stick to the "basic" service limit for now.
-                              const limit = booking.clientSubscription!.serviceLimits[service.id] || 0;
-                              const currentUsed = booking.clientSubscription!.serviceUsage[service.id] || 0;
-
-                              if (limit > 0) {
-                                if (isSelected) {
-                                  const selectedCountBefore = booking.selectedServices
-                                    .slice(0, booking.selectedServices.findIndex(s => s.id === service.id))
-                                    .filter(s => s.id === service.id).length;
-                                  return `${currentUsed + selectedCountBefore + 1}/${limit}`;
-                                } else {
-                                  return `${currentUsed}/${limit}`;
-                                }
-                              }
-                              return "Incluso";
-                            })()}
-                          </span>
-                        );
-                      }
-                      return `R$ ${service.price.toFixed(2)}`;
-                    })()}
-                  </span>
-                  <span className="text-gray-500 text-xs flex items-center gap-1"><span className="material-symbols-outlined text-sm">schedule</span> {service.duration} min</span>
+          {(() => {
+            const prioritized = [...services].sort((a, b) => {
+              const aAllowed = booking.clientSubscription?.isActive && booking.clientSubscription.allowedServices?.includes(a.id);
+              const bAllowed = booking.clientSubscription?.isActive && booking.clientSubscription.allowedServices?.includes(b.id);
+              if (aAllowed && !bAllowed) return -1;
+              if (!aAllowed && bAllowed) return 1;
+              return 0;
+            });
+            return prioritized.map(service => (
+              <label key={service.id} className={`relative flex gap-4 p-4 rounded-xl bg-white dark:bg-surface-dark border transition-all cursor-pointer ${booking.selectedServices.some(s => s.id === service.id) ? 'border-primary' : 'border-gray-200 dark:border-transparent'} shadow-sm hover:shadow-md`}>
+                <div className="size-20 rounded-lg overflow-hidden bg-gray-200 dark:bg-gray-800 shrink-0">
+                  <img
+                    src={service.imageUrl}
+                    onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.parentElement?.classList.add('flex', 'items-center', 'justify-center'); e.currentTarget.parentElement!.innerHTML = '<span class="material-symbols-outlined text-gray-400">image_not_supported</span>'; }}
+                    className="w-full h-full object-cover"
+                    alt={service.name}
+                  />
                 </div>
-              </div>
-              <input
-                type="checkbox"
-                checked={booking.selectedServices.some(s => s.id === service.id)}
-                onChange={() => toggleService(service)}
-                className="hidden"
-              />
-            </label>
-          ))}
+                <div className="flex-1">
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white">{service.name}</h3>
+                  <p className="text-gray-500 dark:text-gray-400 text-xs line-clamp-2 mt-1">{service.description}</p>
+                  <div className="flex justify-between mt-2">
+                    <span className="text-primary font-bold text-sm">
+                      {(() => {
+                        const isSub = booking.clientSubscription?.isActive;
+                        const isAllowed = booking.clientSubscription?.allowedServices?.includes(service.id);
+
+                        if (isSub && isAllowed) {
+                          return (
+                            <span className="text-amber-600 dark:text-amber-500 flex items-center gap-1">
+                              <span className="material-symbols-outlined text-sm filled">check_circle</span>
+                              {(() => {
+                                const isSelected = booking.selectedServices.some(s => s.id === service.id);
+
+                                // Check if it's a combo or individual
+                                // For simplicity in the UI counter, we show the status of the service itself IF it has a direct limit
+                                // OR if it's a combo, we could show something more complex, but let's stick to the "basic" service limit for now.
+                                const limit = booking.clientSubscription!.serviceLimits[service.id] || 0;
+                                const currentUsed = booking.clientSubscription!.serviceUsage[service.id] || 0;
+
+                                if (limit > 0) {
+                                  let available = limit - currentUsed;
+                                  if (isSelected) {
+                                    const selectedCountBefore = booking.selectedServices
+                                      .slice(0, booking.selectedServices.findIndex(s => s.id === service.id))
+                                      .filter(s => s.id === service.id).length;
+                                    available = Math.max(0, available - (selectedCountBefore + 1));
+                                  }
+                                  return `${available}/${limit}`;
+                                }
+                                return "Incluso";
+                              })()}
+                            </span>
+                          );
+                        }
+                        return `R$ ${service.price.toFixed(2)}`;
+                      })()}
+                    </span>
+                    <span className="text-gray-500 text-xs flex items-center gap-1"><span className="material-symbols-outlined text-sm">schedule</span> {service.duration} min</span>
+                  </div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={booking.selectedServices.some(s => s.id === service.id)}
+                  onChange={() => toggleService(service)}
+                  className="hidden"
+                />
+              </label>
+            ));
+          })()}
         </div>
       </main>
       <footer className="fixed bottom-0 w-full bg-white/95 dark:bg-surface-dark/95 backdrop-blur-lg border-t border-gray-100 dark:border-white/5 p-5 pb-8 transition-colors">
@@ -2968,7 +2977,7 @@ const AdminDashboard: React.FC<{
                               const minRemaining = Math.min(...remainingList);
                               return (
                                 <span className="text-[10px] bg-slate-100 dark:bg-white/5 px-1.5 py-0.5 rounded text-gray-500 dark:text-gray-400 font-bold">
-                                  {minRemaining} {minRemaining === 1 ? 'corte restante' : 'cortes restantes'}
+                                  {minRemaining} {minRemaining === 1 ? 'disponível' : 'disponíveis'}
                                 </span>
                               );
                             })()}
@@ -3329,7 +3338,7 @@ const SelectPlanScreen: React.FC<{
       .select('services:appointment_services(service:services(id))')
       .eq('client_id', client.id)
       .gte('appointment_date', startOfMonth)
-      .eq('status', 'COMPLETED');
+      .in('status', ['COMPLETED', 'PENDING', 'CONFIRMED']);
 
     const { data: scData } = await supabase.from('service_components').select('*');
     const componentsMap: Record<string, string[]> = {};
@@ -4023,54 +4032,63 @@ const AdminManagePlansScreen: React.FC<{
                 <div className="space-y-2">
                   <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Serviços Inclusos</label>
                   <div className="grid grid-cols-1 gap-2 border border-gray-100 dark:border-white/5 p-3 rounded-2xl bg-gray-50/50 dark:bg-black/10">
-                    {services.map(s => {
-                      const isChecked = plan.allowed_services?.includes(s.id);
-                      const currentLimit = plan.service_limits?.[s.id] || 0;
-                      return (
-                        <div key={s.id} className="flex items-center justify-between gap-2 group">
-                          <label className="flex items-center gap-2 cursor-pointer flex-1">
-                            <input
-                              type="checkbox"
-                              className="accent-amber-500"
-                              checked={isChecked}
-                              onChange={(e) => {
-                                const newLimits = { ...(plan.service_limits || {}) };
-                                if (e.target.checked) {
-                                  newLimits[s.id] = currentLimit || 1;
-                                } else {
-                                  delete newLimits[s.id];
-                                }
-                                handleUpdate(plan.id, plan.price, plan.qr_code_url || '', plan.pix_code || '', newLimits);
-                              }}
-                            />
-                            <span className="text-xs font-medium text-slate-600 dark:text-gray-400 group-hover:text-amber-500 transition-colors">{s.name}</span>
-                          </label>
-                          {isChecked && (
-                            <div className="flex items-center gap-1 bg-white dark:bg-black/40 rounded-lg px-2 py-1 border border-gray-100 dark:border-white/5">
-                              <span className="text-[9px] font-bold text-gray-400 uppercase">Qtd:</span>
+                    {(() => {
+                      const sorted = [...services].sort((a, b) => {
+                        const aChecked = plan.allowed_services?.includes(a.id);
+                        const bChecked = plan.allowed_services?.includes(b.id);
+                        if (aChecked && !bChecked) return -1;
+                        if (!aChecked && bChecked) return 1;
+                        return 0;
+                      });
+                      return sorted.map(s => {
+                        const isChecked = plan.allowed_services?.includes(s.id);
+                        const currentLimit = plan.service_limits?.[s.id] || 0;
+                        return (
+                          <div key={s.id} className="flex items-center justify-between gap-2 group">
+                            <label className="flex items-center gap-2 cursor-pointer flex-1">
                               <input
-                                type="number"
-                                min="0"
-                                className="w-16 bg-transparent text-xs font-black text-amber-600 focus:outline-none text-center"
-                                value={localLimits[plan.id]?.[s.id] ?? currentLimit}
+                                type="checkbox"
+                                className="accent-amber-500"
+                                checked={isChecked}
                                 onChange={(e) => {
-                                  const val = parseInt(e.target.value) || 0;
-                                  setLocalLimits(prev => ({
-                                    ...prev,
-                                    [plan.id]: { ...(prev[plan.id] || {}), [s.id]: val }
-                                  }));
-                                }}
-                                onBlur={(e) => {
-                                  const val = parseInt(e.target.value) || 0;
-                                  const newLimits = { ...(plan.service_limits || {}), [s.id]: val };
+                                  const newLimits = { ...(plan.service_limits || {}) };
+                                  if (e.target.checked) {
+                                    newLimits[s.id] = currentLimit || 1;
+                                  } else {
+                                    delete newLimits[s.id];
+                                  }
                                   handleUpdate(plan.id, plan.price, plan.qr_code_url || '', plan.pix_code || '', newLimits);
                                 }}
                               />
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
+                              <span className="text-xs font-medium text-slate-600 dark:text-gray-400 group-hover:text-amber-500 transition-colors">{s.name}</span>
+                            </label>
+                            {isChecked && (
+                              <div className="flex items-center gap-1 bg-white dark:bg-black/40 rounded-lg px-2 py-1 border border-gray-100 dark:border-white/5">
+                                <span className="text-[9px] font-bold text-gray-400 uppercase">Qtd:</span>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  className="w-16 bg-transparent text-xs font-black text-amber-600 focus:outline-none text-center"
+                                  value={localLimits[plan.id]?.[s.id] ?? currentLimit}
+                                  onChange={(e) => {
+                                    const val = parseInt(e.target.value) || 0;
+                                    setLocalLimits(prev => ({
+                                      ...prev,
+                                      [plan.id]: { ...(prev[plan.id] || {}), [s.id]: val }
+                                    }));
+                                  }}
+                                  onBlur={(e) => {
+                                    const val = parseInt(e.target.value) || 0;
+                                    const newLimits = { ...(plan.service_limits || {}), [s.id]: val };
+                                    handleUpdate(plan.id, plan.price, plan.qr_code_url || '', plan.pix_code || '', newLimits);
+                                  }}
+                                />
+                              </div>
+                            )}
+                          </div>
+                        );
+                      });
+                    })()}
                   </div>
                 </div>
               </div>
@@ -4365,13 +4383,13 @@ const App: React.FC = () => {
         componentsMap[pid].push(String(item.component_service_id));
       });
 
-      // Fetch COMPLETED appointments this month with services, to compute per-service usage per client
+      // Fetch COMPLETED/PENDING appointments this month with services
       const startOfMonth = format(new Date(), 'yyyy-MM-01');
       const { data: monthApps } = await supabase
         .from('appointments')
-        .select('client_id, services:appointment_services(service:services(id))')
+        .select('client_id, status, services:appointment_services(service_id)')
         .gte('appointment_date', startOfMonth)
-        .eq('status', 'COMPLETED');
+        .in('status', ['COMPLETED', 'PENDING']);
 
       // Build usage map: clientId -> serviceId -> count
       const clientUsage: Record<string, Record<string, number>> = {};
@@ -4379,13 +4397,15 @@ const App: React.FC = () => {
         const cid = String(app.client_id);
         if (!clientUsage[cid]) clientUsage[cid] = {};
         app.services?.forEach((sv: any) => {
-          const sId = String(sv.service?.id);
+          const sId = String(sv.service_id);
+          // Increment specific service usage
+          clientUsage[cid][sId] = (clientUsage[cid][sId] || 0) + 1;
+
           if (componentsMap[sId]) {
+            // It is a combo, increment components too
             componentsMap[sId].forEach(compId => {
               clientUsage[cid][compId] = (clientUsage[cid][compId] || 0) + 1;
             });
-          } else {
-            clientUsage[cid][sId] = (clientUsage[cid][sId] || 0) + 1;
           }
         });
       });
@@ -4404,8 +4424,8 @@ const App: React.FC = () => {
 
           clientSubscription = {
             planName: plan.name,
-            cutsUsed: 0,
-            cutsLimit: 0,
+            cutsUsed: Object.values(serviceUsage).reduce((a, b) => a + b, 0),
+            cutsLimit: plan.monthly_limit || 0,
             serviceLimits,
             serviceUsage,
             allowedServices,
