@@ -4314,6 +4314,14 @@ const App: React.FC = () => {
   }, [unreadCount]);
 
   const fetchAppointments = useCallback(async () => {
+    // Security Guard: Customers must have a phone number to fetch appointments
+    if (currentUserRole === 'CUSTOMER' && !booking.customerPhone) {
+      setAppointments([]);
+      return;
+    }
+
+    const normalizedPhone = booking.customerPhone.replace(/\D/g, '');
+
     let query = supabase
       .from('appointments')
       .select(`
@@ -4321,7 +4329,7 @@ const App: React.FC = () => {
                   services:appointment_services(
                   service:services(*)
                   ),
-                  clients(
+                  clients${currentUserRole === 'CUSTOMER' ? '!inner' : ''}(
                     id,
                     name, 
                     phone,
@@ -4333,6 +4341,10 @@ const App: React.FC = () => {
                   `)
       .order('appointment_date', { ascending: true })
       .order('appointment_time', { ascending: true });
+
+    if (currentUserRole === 'CUSTOMER') {
+      query = query.eq('clients.phone', normalizedPhone);
+    }
 
     // Fetch Unread Count for Admin
     if (currentUserRole === 'BARBER') {
@@ -4499,6 +4511,14 @@ const App: React.FC = () => {
     setBooking(prev => ({ ...prev, customerName: identity.name, customerPhone: identity.phone }));
   };
 
+  const handleLogout = useCallback(() => {
+    setCurrentUserRole('CUSTOMER');
+    setBooking(prev => ({ ...prev, customerName: '', customerPhone: '', clientSubscription: undefined }));
+    localStorage.removeItem('admin_auth');
+    supabase.auth.signOut();
+    setView('LANDING');
+  }, []);
+
   const handleSendMessage = async (text: string, identity?: { name: string, phone: string }) => {
     if (identity) {
       setBooking(prev => ({ ...prev, customerName: identity.name, customerPhone: identity.phone }));
@@ -4644,7 +4664,7 @@ const App: React.FC = () => {
           onPerfil={() => {
             setView('CUSTOMER_LOGIN');
           }}
-          onMais={() => setView('LANDING')}
+          onMais={handleLogout}
           onAssinatura={() => setView('SELECT_PLAN')}
         />;
       case 'SELECT_SERVICES':
@@ -4681,11 +4701,7 @@ const App: React.FC = () => {
         return <AdminDashboard
           appointments={appointments}
           unreadCount={unreadCount}
-          onLogout={() => {
-            localStorage.removeItem('admin_auth');
-            supabase.auth.signOut();
-            setView('LANDING');
-          }}
+          onLogout={handleLogout}
           onOpenChat={() => { setCurrentUserRole('BARBER'); setView('ADMIN_CHAT_LIST'); }}
           onManageServices={() => setView('ADMIN_SERVICES')}
           onBlockSchedule={() => setView('ADMIN_BLOCK_SCHEDULE')}
