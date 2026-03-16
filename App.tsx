@@ -4321,6 +4321,7 @@ const App: React.FC = () => {
     }
 
     const normalizedPhone = booking.customerPhone.replace(/\D/g, '');
+    const thirtyDaysAgo = format(addDays(new Date(), -30), 'yyyy-MM-dd');
 
     let query = supabase
       .from('appointments')
@@ -4344,64 +4345,61 @@ const App: React.FC = () => {
 
     if (currentUserRole === 'CUSTOMER') {
       query = query.eq('clients.phone', normalizedPhone);
+    } else {
+      // Admin: Only fetch from 30 days ago to keep payload light
+      query = query.gte('appointment_date', thirtyDaysAgo);
     }
 
-    // Fetch Unread Count for Admin
+    // Fetch Unread Count for Admin (in parallel later if possible, but for now simple)
     if (currentUserRole === 'BARBER') {
-      const { count } = await supabase
+      supabase
         .from('chat_messages')
         .select('*', { count: 'exact', head: true })
         .eq('is_read', false)
-        .eq('sender_type', 'CUSTOMER');
-      setUnreadCount(count || 0);
+        .eq('sender_type', 'CUSTOMER')
+        .then(({ count }) => setUnreadCount(count || 0));
     }
-
-    // Client-side filtering for customer (or do it in RLS/query filter if simple)
-    // Actually we can filter by client phone join, but for now fetch all and filter is safer if we don't have perfect join filtering setup
 
     const { data, error } = await query;
 
-    if (data) {
+    if (data && data.length > 0) {
       const dataString = JSON.stringify(data);
       if (dataString === lastAppointmentsDataStringRef.current) return;
       lastAppointmentsDataStringRef.current = dataString;
 
-      // Fetch plan_services limits for ALL unique plan ids in this batch
+      const clientIds = [...new Set(data.map((a: any) => a.client_id).filter(Boolean))];
       const planIds = [...new Set(data
         .map((a: any) => a.clients?.user_subscriptions?.find((s: any) => s.status === 'APPROVED')?.subscription_plans?.id)
         .filter(Boolean)
       )];
 
+      // Parallelize secondary fetches
+      const startOfMonth = format(new Date(), 'yyyy-MM-01');
+      const [psDataFetch, scDataFetch, monthAppsFetch] = await Promise.all([
+        planIds.length > 0 ? supabase.from('plan_services').select('plan_id, service_id, monthly_limit').in('plan_id', planIds) : Promise.resolve({ data: [] }),
+        supabase.from('service_components').select('*'),
+        supabase.from('appointments').select('client_id, status, services:appointment_services(service_id)').gte('appointment_date', startOfMonth).in('status', ['COMPLETED', 'PENDING']).in('client_id', clientIds)
+      ]);
+
+      const psData = psDataFetch.data;
+      const scData = scDataFetch.data;
+      const monthApps = monthAppsFetch.data;
+
       // Map planId -> { serviceId -> monthly_limit }
       const planServiceLimits: Record<string, Record<string, number>> = {};
-      if (planIds.length > 0) {
-        const { data: psData } = await supabase
-          .from('plan_services')
-          .select('plan_id, service_id, monthly_limit')
-          .in('plan_id', planIds);
-        psData?.forEach((ps: any) => {
-          const pid = String(ps.plan_id);
-          if (!planServiceLimits[pid]) planServiceLimits[pid] = {};
-          planServiceLimits[pid][String(ps.service_id)] = ps.monthly_limit;
-        });
-      }
+      psData?.forEach((ps: any) => {
+        const pid = String(ps.plan_id);
+        if (!planServiceLimits[pid]) planServiceLimits[pid] = {};
+        planServiceLimits[pid][String(ps.service_id)] = ps.monthly_limit;
+      });
 
       // Fetch service_components to unpack combos when calculating usage
-      const { data: scData } = await supabase.from('service_components').select('*');
       const componentsMap: Record<string, string[]> = {};
       scData?.forEach((item: any) => {
         const pid = String(item.parent_service_id);
         if (!componentsMap[pid]) componentsMap[pid] = [];
         componentsMap[pid].push(String(item.component_service_id));
       });
-
-      // Fetch COMPLETED/PENDING appointments this month with services
-      const startOfMonth = format(new Date(), 'yyyy-MM-01');
-      const { data: monthApps } = await supabase
-        .from('appointments')
-        .select('client_id, status, services:appointment_services(service_id)')
-        .gte('appointment_date', startOfMonth)
-        .in('status', ['COMPLETED', 'PENDING']);
 
       // Build usage map: clientId -> serviceId -> count
       const clientUsage: Record<string, Record<string, number>> = {};
@@ -4410,11 +4408,8 @@ const App: React.FC = () => {
         if (!clientUsage[cid]) clientUsage[cid] = {};
         app.services?.forEach((sv: any) => {
           const sId = String(sv.service_id);
-          // Increment specific service usage
           clientUsage[cid][sId] = (clientUsage[cid][sId] || 0) + 1;
-
           if (componentsMap[sId]) {
-            // It is a combo, increment components too
             componentsMap[sId].forEach(compId => {
               clientUsage[cid][compId] = (clientUsage[cid][compId] || 0) + 1;
             });
