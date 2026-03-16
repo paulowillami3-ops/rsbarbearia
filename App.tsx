@@ -1515,10 +1515,12 @@ const ReviewScreen: React.FC<{
 
 const MyAppointmentsScreen: React.FC<{
   appointments: Appointment[];
+  showPastHistory: boolean;
+  setShowPastHistory: (show: boolean) => void;
   onBack: () => void;
   onNew: () => void;
   onRefresh: () => void;
-}> = ({ appointments, onBack, onNew, onRefresh }) => {
+}> = ({ appointments, showPastHistory, setShowPastHistory, onBack, onNew, onRefresh }) => {
   const [activeTab, setActiveTab] = useState<'upcoming' | 'past'>('upcoming');
 
   const filteredAppointments = useMemo(() => {
@@ -1581,50 +1583,69 @@ const MyAppointmentsScreen: React.FC<{
           {filteredAppointments.length === 0 ? (
             <div className="text-center py-16 bg-white dark:bg-surface-dark/30 rounded-3xl border border-gray-200 dark:border-white/5 border-dashed transition-colors">
               <span className="material-symbols-outlined text-4xl text-gray-400 dark:text-gray-700 mb-2">event_busy</span>
-              <p className="text-gray-500 text-sm">Nenhum agendamento {activeTab === 'upcoming' ? 'marcado' : 'encontrado'}.</p>
+              <p className="text-gray-500 text-sm mb-4">Nenhum agendamento {activeTab === 'upcoming' ? 'marcado' : 'encontrado'}.</p>
+              {activeTab === 'past' && !showPastHistory && (
+                <button
+                  onClick={() => setShowPastHistory(true)}
+                  className="px-6 py-2 bg-primary/10 text-primary rounded-xl font-bold hover:bg-primary/20 transition-all flex items-center gap-2 mx-auto"
+                >
+                  <span className="material-symbols-outlined text-base">history</span>
+                  Carregar Todo o Histórico
+                </button>
+              )}
             </div>
           ) : (
-            filteredAppointments.map(app => (
-              <div key={app.id} className="bg-white dark:bg-surface-dark rounded-2xl border border-gray-200 dark:border-white/5 mb-4 overflow-hidden shadow-sm relative hover:border-primary/20 dark:hover:border-white/10 transition-all">
-                <div className={`absolute top-0 right-0 px-3 py-1 text-[10px] font-bold rounded-bl-xl tracking-wider uppercase ${app.status === 'CANCELLED' ? 'bg-red-500/10 text-red-500' : 'bg-green-500/20 text-green-700 dark:text-green-400'
-                  }`}>{app.status}</div>
-                <div className="p-4 flex gap-4">
-                  <div className={`size-16 rounded-xl flex flex-col items-center justify-center border transition-colors ${activeTab === 'past' ? 'bg-gray-100 border-gray-200 opacity-70' : 'bg-gray-50 dark:bg-white/5 border-gray-100 dark:border-white/5'
-                    }`}>
-                    <span className="text-[10px] font-bold uppercase text-gray-500">Dia</span>
-                    <span className="text-xl font-bold text-slate-900 dark:text-white">{app.date.split('-')[2]}</span>
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-sm text-slate-900 dark:text-white">{app.services?.[0]?.name || 'Serviço não especificado'} {app.services?.length > 1 ? `+ ${app.services.length - 1} serviço` : ''}</h3>
-                    <div className="flex flex-col gap-1 mt-2">
-                      <p className="text-gray-500 dark:text-gray-400 text-xs flex items-center gap-1"><span className="material-symbols-outlined text-[14px]">calendar_month</span> {formatDateToBRL(app.date)}</p>
-                      <p className="text-gray-500 dark:text-gray-400 text-xs flex items-center gap-1"><span className="material-symbols-outlined text-[14px]">schedule</span> {app.time}</p>
+            <>
+              {filteredAppointments.map(app => (
+                <div key={app.id} className="bg-white dark:bg-surface-dark rounded-2xl border border-gray-200 dark:border-white/5 mb-4 overflow-hidden shadow-sm relative hover:border-primary/20 dark:hover:border-white/10 transition-all">
+                  <div className={`absolute top-0 right-0 px-3 py-1 text-[10px] font-bold rounded-bl-xl tracking-wider uppercase ${app.status === 'CANCELLED' ? 'bg-red-500/10 text-red-500' : 'bg-green-500/20 text-green-700 dark:text-green-400'
+                    }`}>{app.status}</div>
+                  <div className="p-4 flex gap-4">
+                    <div className={`size-16 rounded-xl flex flex-col items-center justify-center border transition-colors ${activeTab === 'past' ? 'bg-gray-100 border-gray-200 opacity-70' : 'bg-gray-50 dark:bg-white/5 border-gray-100 dark:border-white/5'
+                      }`}>
+                      <span className="text-[10px] font-bold uppercase text-gray-500">Dia</span>
+                      <span className="text-xl font-bold text-slate-900 dark:text-white">{app.date.split('-')[2]}</span>
+                    </div>
+                    <div>
+                      <h3 className="font-bold text-sm text-slate-900 dark:text-white">{app.services?.[0]?.name || 'Serviço não especificado'} {app.services?.length > 1 ? `+ ${app.services.length - 1} serviço` : ''}</h3>
+                      <div className="flex flex-col gap-1 mt-2">
+                        <p className="text-gray-500 dark:text-gray-400 text-xs flex items-center gap-1"><span className="material-symbols-outlined text-[14px]">calendar_month</span> {formatDateToBRL(app.date)}</p>
+                        <p className="text-gray-500 dark:text-gray-400 text-xs flex items-center gap-1"><span className="material-symbols-outlined text-[14px]">schedule</span> {app.time}</p>
+                      </div>
                     </div>
                   </div>
-                </div>
-                <div className="p-4 border-t border-gray-100 dark:border-white/5 flex items-center justify-between bg-gray-50/50 dark:bg-white/[0.02] transition-colors">
-                  <span className="font-bold text-slate-900 dark:text-white">R$ {app.totalPrice.toFixed(2)}</span>
-                  {activeTab === 'upcoming' && (
-                    <button
-                      onClick={async () => {
-                        if (window.confirm('Deseja realmente cancelar este agendamento?')) {
-                          const { error } = await supabase.from('appointments').delete().eq('id', app.id);
-                          if (error) {
-                            console.error('Erro ao cancelar:', error);
-                            alert('Não foi possível cancelar o agendamento.');
-                          } else {
-                            onRefresh();
+                  <div className="p-4 border-t border-gray-100 dark:border-white/5 flex items-center justify-between bg-gray-50/50 dark:bg-white/[0.02] transition-colors">
+                    <span className="font-bold text-slate-900 dark:text-white">R$ {app.totalPrice.toFixed(2)}</span>
+                    {activeTab === 'upcoming' && (
+                      <button
+                        onClick={async () => {
+                          if (window.confirm('Deseja realmente cancelar este agendamento?')) {
+                            const { error } = await supabase.from('appointments').delete().eq('id', app.id);
+                            if (error) {
+                              console.error('Erro ao cancelar:', error);
+                              alert('Não foi possível cancelar o agendamento.');
+                            } else {
+                              onRefresh();
+                            }
                           }
-                        }
-                      }}
-                      className="text-primary text-xs font-bold uppercase flex items-center gap-1 hover:opacity-80 transition-opacity"
-                    >
-                      <span className="material-symbols-outlined text-sm">cancel</span> Cancelar
-                    </button>
-                  )}
+                        }}
+                        className="text-primary text-xs font-bold uppercase flex items-center gap-1 hover:opacity-80 transition-opacity"
+                      >
+                        <span className="material-symbols-outlined text-sm">cancel</span> Cancelar
+                      </button>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))
+              ))}
+              {activeTab === 'past' && !showPastHistory && (
+                <button
+                  onClick={() => setShowPastHistory(true)}
+                  className="w-full py-4 text-primary text-xs font-bold uppercase hover:bg-primary/5 rounded-xl transition-all"
+                >
+                  Ver agendamentos mais antigos
+                </button>
+              )}
+            </>
           )}
         </section>
         <div className="mt-8 p-6 rounded-3xl bg-primary/5 border border-primary/20 text-center shadow-sm">
@@ -2535,6 +2556,8 @@ const AdminTVScreen: React.FC<{ appointments: Appointment[]; onBack: () => void;
 
 const AdminDashboard: React.FC<{
   appointments: Appointment[];
+  showPastHistory: boolean;
+  setShowPastHistory: (show: boolean) => void;
   onLogout: () => void;
   onOpenChat: () => void;
   onManageServices: () => void;
@@ -2549,7 +2572,7 @@ const AdminDashboard: React.FC<{
   onClients: () => void;
   setAppointments: React.Dispatch<React.SetStateAction<Appointment[]>>;
   unreadCount: number;
-}> = ({ appointments, onLogout, onOpenChat, onManageServices, onBlockSchedule, onSettings, onWeeklySchedule, onFinance, onTV, onSubscriptions, onManagePlans, onRefresh, onClients, setAppointments, unreadCount }) => {
+}> = ({ appointments, showPastHistory, setShowPastHistory, onLogout, onOpenChat, onManageServices, onBlockSchedule, onSettings, onWeeklySchedule, onFinance, onTV, onSubscriptions, onManagePlans, onRefresh, onClients, setAppointments, unreadCount }) => {
   const availableDays = useMemo(() => getNextDays(7), []);
   const [selectedDateStr, setSelectedDateStr] = useState(availableDays[0].dateStr); // Default to local today string
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
@@ -2917,7 +2940,26 @@ const AdminDashboard: React.FC<{
               </div>
 
               <h3 className="text-[11px] text-gray-500 font-bold uppercase mb-5 tracking-widest px-1 flex justify-between items-center">
-                <span>Cronograma</span>
+                <div className="flex items-center gap-2">
+                  <span>Cronograma</span>
+                  {!showPastHistory ? (
+                    <button
+                      onClick={() => setShowPastHistory(true)}
+                      className="text-[9px] bg-primary/10 text-primary px-2 py-0.5 rounded-full hover:bg-primary/20 transition-colors flex items-center gap-1"
+                    >
+                      <span className="material-symbols-outlined text-[10px]">history</span>
+                      Ver Histórico
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => setShowPastHistory(false)}
+                      className="text-[9px] bg-gray-100 dark:bg-white/5 text-gray-500 px-2 py-0.5 rounded-full hover:bg-gray-200 dark:hover:bg-white/10 transition-colors flex items-center gap-1"
+                    >
+                      <span className="material-symbols-outlined text-[10px]">today</span>
+                      Ocultar Histórico
+                    </button>
+                  )}
+                </div>
                 <span className="bg-primary/10 text-primary px-2 py-0.5 rounded-full normal-case text-[10px]">{pendingApps.length} agendamentos</span>
               </h3>
 
@@ -4296,7 +4338,7 @@ const App: React.FC = () => {
   const [showSuccess, setShowSuccess] = useState(false);
 
   const [appointments, setAppointments] = useState<Appointment[]>([]);
-
+  const [showPastHistory, setShowPastHistory] = useState(false);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const prevUnreadCountRef = useRef(0);
@@ -4321,6 +4363,7 @@ const App: React.FC = () => {
     }
 
     const normalizedPhone = booking.customerPhone.replace(/\D/g, '');
+    const today = format(new Date(), 'yyyy-MM-dd');
     const thirtyDaysAgo = format(addDays(new Date(), -30), 'yyyy-MM-dd');
 
     let query = supabase
@@ -4345,9 +4388,18 @@ const App: React.FC = () => {
 
     if (currentUserRole === 'CUSTOMER') {
       query = query.eq('clients.phone', normalizedPhone);
+      if (!showPastHistory) {
+        query = query.gte('appointment_date', today);
+      }
     } else {
-      // Admin: Only fetch from 30 days ago to keep payload light
-      query = query.gte('appointment_date', thirtyDaysAgo);
+      // Admin: 
+      if (!showPastHistory) {
+        // If history not requested, default to TODAY onwards
+        query = query.gte('appointment_date', today);
+      } else {
+        // If history requested, limit to last 30 days to avoid extreme payload
+        query = query.gte('appointment_date', thirtyDaysAgo);
+      }
     }
 
     // Fetch Unread Count for Admin (in parallel later if possible, but for now simple)
@@ -4475,7 +4527,7 @@ const App: React.FC = () => {
       prevAppCountRef.current = newApps.length;
       isFirstLoadRef.current = false;
     }
-  }, [currentUserRole, booking.customerPhone]);
+  }, [currentUserRole, booking.customerPhone, showPastHistory]);
 
   useEffect(() => {
     fetchAppointments();
@@ -4686,6 +4738,8 @@ const App: React.FC = () => {
       case 'MY_APPOINTMENTS':
         return <MyAppointmentsScreen
           appointments={appointments}
+          showPastHistory={showPastHistory}
+          setShowPastHistory={setShowPastHistory}
           onBack={() => setView('HOME')}
           onNew={() => setView('SELECT_SERVICES')}
           onRefresh={fetchAppointments}
@@ -4695,6 +4749,8 @@ const App: React.FC = () => {
       case 'ADMIN_DASHBOARD':
         return <AdminDashboard
           appointments={appointments}
+          showPastHistory={showPastHistory}
+          setShowPastHistory={setShowPastHistory}
           unreadCount={unreadCount}
           onLogout={handleLogout}
           onOpenChat={() => { setCurrentUserRole('BARBER'); setView('ADMIN_CHAT_LIST'); }}
