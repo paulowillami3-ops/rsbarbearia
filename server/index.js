@@ -130,7 +130,7 @@ async function checkUnreadMessages() {
     const payload = JSON.stringify({
         title: 'Nova Mensagem',
         body: latestMsg.message_text || 'Você recebeu uma nova mensagem.',
-        url: 'https://rsbarbearia.com/admin' // or local url
+        url: `${process.env.VITE_SITE_URL || 'http://localhost:5173'}/admin`
     });
 
     // 3. Send Push
