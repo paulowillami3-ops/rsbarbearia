@@ -150,6 +150,50 @@ async function checkUnreadMessages() {
 
 setInterval(checkUnreadMessages, 5000); // Check every 5s
 
+// --- Check New Appointments & Send Push ---
+let lastNotifiedAppointmentId = null;
+
+async function checkNewAppointments() {
+    const { data: appointments } = await supabase
+        .from('appointments')
+        .select('*, clients(name)')
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+    if (!appointments || appointments.length === 0) return;
+
+    const latestApp = appointments[0];
+    if (latestApp.id === lastNotifiedAppointmentId) return;
+
+    // First run initialization
+    if (lastNotifiedAppointmentId === null) {
+        lastNotifiedAppointmentId = latestApp.id;
+        return;
+    }
+
+    const { data: subs } = await supabase.from('push_subscriptions').select('subscription');
+    if (!subs || subs.length === 0) return;
+
+    const clientName = latestApp.clients?.name || 'Um cliente';
+    const payload = JSON.stringify({
+        title: 'Novo Agendamento! ✂️',
+        body: `${clientName} acabou de agendar um horário para ${latestApp.appointment_date}.`,
+        url: `${process.env.VITE_SITE_URL || 'http://localhost:5173'}/admin`
+    });
+
+    for (const subRow of subs) {
+        try {
+            await webpush.sendNotification(subRow.subscription, payload);
+        } catch (err) {
+            // console.error('[Worker] Error sending appointment push:', err);
+        }
+    }
+
+    lastNotifiedAppointmentId = latestApp.id;
+}
+
+setInterval(checkNewAppointments, 10000); // Check every 10s
+
 app.listen(PORT, () => {
     console.log(`Worker Server running on port ${PORT}`);
     console.log(`Connected to Supabase: ${supabaseUrl}`);

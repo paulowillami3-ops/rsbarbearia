@@ -745,11 +745,13 @@ const SelectDateTimeScreen: React.FC<{
         })));
       }
 
+      const todayStr = format(new Date(), 'yyyy-MM-dd');
       // Fetch Appointments with Service Durations
       const { data: apps } = await supabase
         .from('appointments')
         .select('*, services:appointment_services(service:services(duration))')
-        .neq('status', 'CANCELLED');
+        .neq('status', 'CANCELLED')
+        .gte('appointment_date', todayStr);
 
       if (apps) {
         setExistingAppointments(apps.map((a: any) => {
@@ -4660,7 +4662,7 @@ const App: React.FC = () => {
     // 1.5 Check Availability
     const { data: dayApps } = await supabase
       .from('appointments')
-      .select('appointment_time')
+      .select('*, services:appointment_services(service:services(duration))')
       .eq('appointment_date', booking.selectedDate)
       .neq('status', 'CANCELLED');
 
@@ -4669,10 +4671,36 @@ const App: React.FC = () => {
       .select('time')
       .eq('date', booking.selectedDate);
 
-    const isTaken = dayApps?.some(a => a.appointment_time?.startsWith(booking.selectedTime));
-    const isBlocked = dayBlocks?.some(b => b.time?.startsWith(booking.selectedTime));
+    const myDuration = booking.selectedServices.reduce((sum, s) => sum + s.duration, 0) || 30;
 
-    if (isTaken || isBlocked) {
+    const toMins = (t: string) => {
+      const [hh, mm] = t.split(':').map(Number);
+      return hh * 60 + mm;
+    };
+
+    const currentSlotStart = toMins(booking.selectedTime);
+    const currentSlotEnd = currentSlotStart + myDuration;
+
+    let hasConflict = false;
+    if (dayApps) {
+      for (const app of dayApps) {
+        const appDuration = app.services?.reduce((sum: number, item: any) => sum + (item.service?.duration || 30), 0) || 30;
+        const appStart = toMins(app.appointment_time?.slice(0, 5) || app.appointment_time);
+        const appEnd = appStart + appDuration;
+        if (currentSlotStart < appEnd && currentSlotEnd > appStart) {
+          hasConflict = true;
+          break;
+        }
+      }
+    }
+
+    const isBlocked = dayBlocks?.some(b => {
+      const blockTime = b.time?.slice(0, 5) || b.time;
+      const blockStart = toMins(blockTime);
+      return blockStart >= currentSlotStart && blockStart < currentSlotEnd;
+    });
+
+    if (hasConflict || isBlocked) {
       alert('Este horário acabou de ser reservado ou bloqueado. Por favor, escolha outro.');
       return;
     }
